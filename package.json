@@ -1,0 +1,13 @@
+{
+  "name": "configuration-manager",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.0",
+    "vitest": "^2.0.0"
+  }
+}

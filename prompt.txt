@@ -1,0 +1,32 @@
+I'm taking care of an application having several instances on different servers. 
+The servers are called API, and then we have the letter of the alphabet. For example, you have APIA, APIB, APIC, etc. it goes until "M".
+Service account will take care of connecting to all these different servers and accessing the configuration file.  
+This application has a configuration folder with a list of configuration files or property files that need to be managed. 
+I would like to conceive a configuration manager that can help me to do some versioning of these configuration files and also make it easier to modify these files. 
+Some of these files follow some rules, and I would like to implement these rules inside the edition of the configuration file to make sure to reduce human error to zero. 
+I also would like to follow a procedure that is performed by my team to avoid doing it manually. 
+I would like an application extremely similar to GitHub, where users can create some branch performance modifications on their configuration file and eventually put it in production. Also, I would like to set some teams. 
+For example, the administrator can create a team of members, and some members can approve some change. Some can just create some requests. We also would like a list of approvers that would be the stakeholders. Their purpose is only to approve changes in the configuration in the different instances. 
+The procedure is the following:
+1. Perform the modifications.
+2. Perform a request by mail to some recipients to approve this modification. For this mail, we need to follow a template that is pre-written and fill information in it. Most of the time, we have a table with the following columns:
+- Description (description of the change)
+- Config Changed (name the config filename that got modified)
+- Newly applies to instances (list all the instances where this config change is applied)
+Each row correspond to a change done on one configuration file. The mail should have a link to the application so that the approver can be capable of approving or rejecting a request for change. 
+3. If the application is rejected, we can eventually modify the modification as done and redo the request, or we can just cancel it. 
+If the procedure is approved, we need to create something a Jira ticket for each configurationj file to modify.
+4. A member of the team needs to take care of checking the modifications as well to make sure that the configuration change is well done. 
+5. Once the configuration is changed, we can merge this branch into production, which means that the configurations will be copied in the targeted instances. 
+6. A mail will be sent to recapitulate all the changes that were done and the Jira ticket related to the change, and eventually a link to a summary of the change. 
+For now, I would like to work with the file ai.fixmsg.properties as a first file to handle the modification. 
+If you see a feature that could be interesting to implement in it and that I didn't talk about, please do not hesitate to tell me, and we can see if we can include it. 
+These configurations are related to the algo trading and trading platform, so you will recognize in this file what is it about.
+This file contains some conditions to include some tags in a fixed message for each order. 
+We just need to be careful that some conditions don't outshine other conditions. We need to be precise to the user when he performs modifications about what the impacts are on the condition that he implemented. For example, if he puts a condition that eventually will make another condition unused, we need to show it to the user. 
+Like GitHub, I would like to have a kind of arborescence of all the changes that were performed, including:
+- to the production
+- who did that
+- who did the shaking
+- who are proved to have a certain history about the change done
+This application must be a web application, please. 
