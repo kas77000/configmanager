@@ -134,45 +134,75 @@ function layout(commits: Commit[]): { rows: GRow[]; width: number } {
 function CommitGraph({ commits }: { commits: Commit[] }) {
   const nav = useNavigate();
   const { rows, width } = useMemo(() => layout(commits), [commits]);
-  const gw = width * LW;
-  const laneX = (l: number) => l * LW + LW / 2;
+  const gw = width * LW + 10;
+  const laneX = (l: number) => l * LW + LW / 2 + 5;
   const color = (l: number) => LANE_COLORS[l % LANE_COLORS.length];
+  const mid = ROW_H / 2;
 
   return (
-    <div className="stack">
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--faint)', fontWeight: 600 }}>
+        <span style={{ width: gw, flex: 'none' }}>Graph</span>
+        <span style={{ flex: 1 }}>Description</span>
+        <span style={{ width: 110, flex: 'none' }}>Author</span>
+        <span style={{ width: 78, flex: 'none', textAlign: 'right' }}>When</span>
+      </div>
       {rows.map((r) => {
         const cx = laneX(r.lane);
         return (
-          <div key={r.commit.hash} className="rowlink" style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => nav(`/commits/${r.commit.hash}`)}>
+          <div key={r.commit.hash} className="rowlink" style={{ display: 'flex', alignItems: 'center', borderBottom: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => nav(`/commits/${r.commit.hash}`)}>
             <svg width={gw} height={ROW_H} style={{ flex: 'none' }}>
-              {/* pass-through lanes */}
               {r.inLanes.map((h, j) => (h && j !== r.lane && !r.mine.includes(j) && r.out[j] ? (
-                <line key={`p${j}`} x1={laneX(j)} y1={0} x2={laneX(j)} y2={ROW_H} stroke={color(j)} strokeWidth={1.5} />
+                <line key={`p${j}`} x1={laneX(j)} y1={0} x2={laneX(j)} y2={ROW_H} stroke={color(j)} strokeWidth={2} />
               ) : null))}
-              {/* merge-in from other lanes that also expected this commit */}
               {r.mine.filter((j) => j !== r.lane).map((j) => (
-                <path key={`m${j}`} d={`M ${laneX(j)} 0 C ${laneX(j)} ${ROW_H / 2}, ${cx} ${ROW_H / 2}, ${cx} ${ROW_H / 2}`} stroke={color(j)} strokeWidth={1.5} fill="none" />
+                <path key={`m${j}`} d={`M ${laneX(j)} 0 C ${laneX(j)} ${mid}, ${cx} ${mid}, ${cx} ${mid}`} stroke={color(j)} strokeWidth={2} fill="none" />
               ))}
-              {/* edges to parents */}
               {Object.values(r.parentLanes).map((pl) => (
-                <path key={`e${pl}`} d={`M ${cx} ${ROW_H / 2} C ${cx} ${ROW_H * 0.75}, ${laneX(pl)} ${ROW_H * 0.75}, ${laneX(pl)} ${ROW_H}`} stroke={color(pl)} strokeWidth={1.5} fill="none" />
+                <path key={`e${pl}`} d={`M ${cx} ${mid} C ${cx} ${mid + ROW_H / 4}, ${laneX(pl)} ${mid + ROW_H / 4}, ${laneX(pl)} ${ROW_H}`} stroke={color(pl)} strokeWidth={2} fill="none" />
               ))}
-              <circle cx={cx} cy={ROW_H / 2} r={4.5} fill="var(--surface)" stroke={color(r.lane)} strokeWidth={2} />
+              <circle cx={cx} cy={mid} r={5} fill={color(r.lane)} stroke="var(--surface)" strokeWidth={1.5} />
             </svg>
-            <div style={{ padding: '6px 12px 6px 4px', minWidth: 0, flex: 1 }}>
-              <div className="hstack" style={{ justifyContent: 'space-between', gap: 8 }}>
-                <span className="hstack" style={{ minWidth: 0 }}>
-                  <span className="mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{r.commit.hash.slice(0, 7)}</span>
-                  <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.subject}</span>
-                </span>
-                {r.commit.refs && <RefBadges refs={r.commit.refs} />}
-              </div>
-              <div className="faint" style={{ fontSize: 11 }}>{r.commit.authorName} · {relTime(r.commit.date)}{r.commit.parents.length > 1 ? ' · merge' : ''}</div>
+            <div className="hstack" style={{ flex: 1, minWidth: 0, gap: 8, padding: '0 8px 0 2px' }}>
+              {parseRefs(r.commit.refs).map((ref, i) => <RefPill key={i} ref_={ref} color={color(r.lane)} />)}
+              <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.subject}</span>
+              <span className="mono faint" style={{ fontSize: 11, flex: 'none' }}>{r.commit.hash.slice(0, 7)}</span>
             </div>
+            <span className="faint" style={{ width: 110, flex: 'none', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.authorName}</span>
+            <span className="faint" style={{ width: 78, flex: 'none', fontSize: 12, textAlign: 'right', paddingRight: 12 }}>{relTime(r.commit.date)}</span>
           </div>
         );
       })}
     </div>
+  );
+}
+
+interface Ref { name: string; kind: 'instance' | 'change' | 'tag' | 'other'; head: boolean }
+
+function parseRefs(refs: string): Ref[] {
+  if (!refs) return [];
+  return refs.split(',').map((s) => s.trim()).filter(Boolean).map((raw) => {
+    let head = false;
+    let name = raw;
+    if (name.startsWith('HEAD -> ')) { head = true; name = name.slice(8); }
+    if (name === 'HEAD') { head = true; }
+    if (name.startsWith('tag: ')) return { name: name.slice(5), kind: 'tag' as const, head };
+    const kind = name.startsWith('instance/') ? 'instance' as const : name.startsWith('change/') ? 'change' as const : 'other' as const;
+    return { name, kind, head };
+  }).filter((r) => r.name !== 'HEAD');
+}
+
+function RefPill({ ref_, color }: { ref_: Ref; color: string }) {
+  const instance = ref_.kind === 'instance';
+  return (
+    <span className="mono" style={{
+      flex: 'none', fontSize: 10, padding: '1px 7px', borderRadius: 20, whiteSpace: 'nowrap',
+      border: `1px solid ${color}`, color,
+      background: instance ? `color-mix(in oklch, ${color} 18%, transparent)` : 'transparent',
+      fontWeight: instance ? 600 : 400,
+    }}>
+      {ref_.head && <span style={{ opacity: 0.7 }}>● </span>}{ref_.name}
+    </span>
   );
 }
 
@@ -214,7 +244,3 @@ function renderDetails(e: AuditEvent) {
   return <span className="faint" style={{ fontSize: 12 }}> · {bits.join(' · ')}</span>;
 }
 
-function RefBadges({ refs }: { refs: string }) {
-  const parts = refs.split(',').map((r) => r.trim().replace(/^HEAD -> /, '')).filter(Boolean);
-  return <span className="hstack" style={{ gap: 4 }}>{parts.slice(0, 2).map((r) => <span key={r} className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>{r}</span>)}</span>;
-}
