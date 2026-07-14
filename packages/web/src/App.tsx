@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
-import { api, canApprove, canEdit, getDevUser, setDevUser, ROLE_LABEL, type User } from './api';
+import { api, canApprove, canEdit, isAdmin, getDevUser, setDevUser, roleSummary, type User } from './api';
 import { currentTheme, toggleTheme } from './theme';
 import { IconBranch, IconHistory, IconInbox, IconMoon, IconServer, IconSettings, IconSun, IconUsers } from './icons';
 import Dashboard from './pages/Dashboard';
@@ -22,15 +22,10 @@ export default function App() {
 
   function changeDevUser(v: string) { setDevUser(v); setDev(v); }
 
-  const role = me?.role;
-  const nav = {
-    instances: role !== 'stakeholder',
-    changes: canEdit(role),
-    history: role !== 'stakeholder' && role !== 'pending',
-    requests: canApprove(role),
-    people: role === 'admin',
-    admin: role === 'admin',
-  };
+  const editor = canEdit(me?.roles);
+  const approver = canApprove(me?.roles);
+  const admin = isAdmin(me?.roles);
+  const nav = { instances: editor, changes: editor, history: editor, requests: approver, people: admin, admin };
 
   return (
     <div className="shell">
@@ -51,13 +46,13 @@ export default function App() {
             <span>Signed in as (dev)</span>
             <input className="input" value={devUser} onChange={(e) => changeDevUser(e.target.value)} spellCheck={false} />
           </label>
-          {me && <div className="faint" style={{ fontSize: 11 }}>{ROLE_LABEL[me.role]}</div>}
+          {me && <div className="faint" style={{ fontSize: 11 }}>{roleSummary(me.roles)}</div>}
         </div>
       </aside>
 
       <main className="main">
         <Routes>
-          <Route path="/" element={role === 'stakeholder' ? <Navigate to="/requests" replace /> : <Dashboard me={me} />} />
+          <Route path="/" element={editor ? <Dashboard me={me} /> : approver ? <Navigate to="/requests" replace /> : <div className="page"><div className="panel"><div className="empty">Your account is pending role assignment.</div></div></div>} />
           <Route path="/instances/:code" element={<InstancePage />} />
           <Route path="/changes" element={<Changes me={me} />} />
           <Route path="/changes/:id" element={<ChangeDetail me={me} />} />

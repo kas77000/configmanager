@@ -15,25 +15,25 @@ describe('UserDirectory', () => {
     const dir = await tmp();
     const users = new UserDirectory(new JsonStore<User[]>(join(dir, 'users.json'), []));
     const first = await users.ensure('root');
-    expect(first).toMatchObject({ windowsId: 'root', role: 'admin' });
+    expect(first.roles).toEqual(['admin']);
     const second = await users.ensure('salavat');
-    expect(second).toMatchObject({ windowsId: 'salavat', role: 'pending' });
+    expect(second.roles).toEqual([]);
     // ensure is idempotent
     await users.ensure('salavat');
     expect((await users.list()).length).toBe(2);
     await rm(dir, { recursive: true, force: true });
   });
 
-  it('updates a role and persists it', async () => {
+  it('updates roles and persists them', async () => {
     const dir = await tmp();
     const path = join(dir, 'users.json');
     const users = new UserDirectory(new JsonStore<User[]>(path, []));
     await users.ensure('salavat');
-    await users.setRole('salavat', 'admin');
+    await users.setRoles('salavat', ['editor', 'stakeholder']);
 
     // fresh instance reads from disk
     const reloaded = new UserDirectory(new JsonStore<User[]>(path, []));
-    expect((await reloaded.get('salavat'))?.role).toBe('admin');
+    expect((await reloaded.get('salavat'))?.roles).toEqual(['editor', 'stakeholder']);
     await rm(dir, { recursive: true, force: true });
   });
 });

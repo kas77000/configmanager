@@ -36,8 +36,8 @@ async function makeHarness(): Promise<Harness> {
   await seedInstances(instances);
   const reader = new StaticInstanceReader();
   reader.set('APIA', FILE, CLEAN); // live matches recorded by default
-  await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', role: 'admin' });
-  await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', role: 'editor' });
+  await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', roles: ['admin'] });
+  await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', roles: ['editor'] });
   const app = createApp({ repo, users, audit, changes, instances, reader, jira: new StubJiraClient(), appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
@@ -222,7 +222,7 @@ describe('API (per-instance)', () => {
   it('gates merge behind approval and enforces roles', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
-    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'stake', role: 'stakeholder' }).expect(201);
+    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'stake', roles: ['stakeholder'] }).expect(201);
 
     const id = (await ed('post', '/api/changes').send({ description: 'Korea 144=1', instances: ['APIA'] }).expect(201)).body.id;
     await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
@@ -248,7 +248,7 @@ describe('API (per-instance)', () => {
   it('creates Jira tickets on approval and generates an Outlook approval draft', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
-    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', role: 'approver', email: 'boss@x' }).expect(201);
+    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', roles: ['editor', 'stakeholder'], email: 'boss@x' }).expect(201);
     await as(h.app, 'root')('post', '/api/instances/APIA/files').send({ file: 'risk.properties', content: 'r=0\n' }).expect(201);
 
     const id = (await ed('post', '/api/changes').send({ description: 'Korea 144=1', instances: ['APIA'], files: [FILE, 'risk.properties'] }).expect(201)).body.id;

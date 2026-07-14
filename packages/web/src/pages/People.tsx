@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ROLES, ROLE_LABEL, api, type Role, type User } from '../api';
+import { ROLES, ROLE_LABEL, api, isAdmin, roleSummary, type Role, type User } from '../api';
 import { Skeleton } from '../components';
 import { IconPlus, IconTrash } from '../icons';
 
@@ -10,7 +10,7 @@ export default function People({ me }: { me: User | null }) {
   async function refresh() { setUsers(await api.users()); }
   useEffect(() => { refresh().catch(() => setUsers([])); }, []);
 
-  if (me && me.role !== 'admin') {
+  if (me && !isAdmin(me.roles)) {
     return <div className="page"><div className="panel"><div className="empty">Admin only.</div></div></div>;
   }
 
@@ -25,7 +25,7 @@ export default function People({ me }: { me: User | null }) {
         <div>
           <div className="eyebrow">Administration</div>
           <h1>People</h1>
-          <p>Add team members by Windows ID and give them a role. Quant (editor) creates and reviews changes; Boss (approver) also approves; Stakeholders only approve or reject requests.</p>
+          <p>Add team members by Windows ID and assign one or more roles. Quant (editor) creates and reviews changes; Stakeholder approves or rejects requests. A "boss" is simply someone who is both. No roles means the account is pending.</p>
         </div>
       </div>
 
@@ -43,8 +43,8 @@ export default function People({ me }: { me: User | null }) {
                 <th style={{ width: 150 }}>Windows ID</th>
                 <th>Name</th>
                 <th>Email</th>
-                <th style={{ width: 180 }}>Role</th>
-                <th style={{ width: 90, textAlign: 'right' }}>Actions</th>
+                <th style={{ width: 300 }}>Roles</th>
+                <th style={{ width: 70, textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -54,11 +54,8 @@ export default function People({ me }: { me: User | null }) {
                   <td>{u.displayName}</td>
                   <td className="faint">{u.email || '—'}</td>
                   <td>
-                    <select className="input" style={{ height: 28, padding: '0 8px' }} value={u.role}
-                      disabled={u.windowsId === me?.windowsId}
-                      onChange={(e) => run(api.updateUser(u.windowsId, { role: e.target.value as Role }))}>
-                      {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-                    </select>
+                    <RoleToggles roles={u.roles} disabled={u.windowsId === me?.windowsId}
+                      onChange={(roles) => run(api.updateUser(u.windowsId, { roles }))} />
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     <button className="btn btn-sm btn-danger" disabled={u.windowsId === me?.windowsId}
@@ -74,35 +71,59 @@ export default function People({ me }: { me: User | null }) {
   );
 }
 
+function RoleToggles({ roles, disabled, onChange }: { roles: Role[]; disabled?: boolean; onChange: (roles: Role[]) => void }) {
+  function toggle(r: Role) {
+    onChange(roles.includes(r) ? roles.filter((x) => x !== r) : [...roles, r]);
+  }
+  return (
+    <span className="hstack" style={{ gap: 6, flexWrap: 'wrap' }}>
+      {ROLES.map((r) => (
+        <button key={r} type="button" className="btn btn-sm" disabled={disabled}
+          style={roles.includes(r) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+          onClick={() => toggle(r)}>{ROLE_LABEL[r]}</button>
+      ))}
+      {roles.length === 0 && <span className="faint" style={{ fontSize: 12 }}>pending</span>}
+    </span>
+  );
+}
+
 function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: string) => void }) {
   const [windowsId, setWindowsId] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
-  const [role, setRole] = useState<Role>('editor');
+  const [roles, setRoles] = useState<Role[]>(['editor']);
   const [busy, setBusy] = useState(false);
+
+  function toggle(r: Role) {
+    setRoles((s) => (s.includes(r) ? s.filter((x) => x !== r) : [...s, r]));
+  }
 
   async function submit() {
     if (!windowsId.trim()) return onError('Windows ID required.');
     setBusy(true);
     try {
-      await api.createUser({ windowsId: windowsId.trim(), displayName: displayName.trim() || undefined, email: email.trim() || undefined, role });
-      setWindowsId(''); setDisplayName(''); setEmail(''); setRole('editor');
+      await api.createUser({ windowsId: windowsId.trim(), displayName: displayName.trim() || undefined, email: email.trim() || undefined, roles });
+      setWindowsId(''); setDisplayName(''); setEmail(''); setRoles(['editor']);
       onDone();
     } catch (e) { onError(e instanceof Error ? e.message : 'failed'); } finally { setBusy(false); }
   }
 
   return (
     <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr auto', gap: 12, alignItems: 'end' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
         <label className="field" style={{ margin: 0 }}><span>Windows ID</span><input className="input" value={windowsId} onChange={(e) => setWindowsId(e.target.value)} placeholder="salavat" spellCheck={false} /></label>
         <label className="field" style={{ margin: 0 }}><span>Name</span><input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="optional" /></label>
         <label className="field" style={{ margin: 0 }}><span>Email</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="optional" /></label>
-        <label className="field" style={{ margin: 0 }}><span>Role</span>
-          <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
-            {ROLES.filter((r) => r !== 'pending').map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-          </select>
-        </label>
-        <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? <span className="spinner" /> : <IconPlus />}Add</button>
+      </div>
+      <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
+          <span className="faint" style={{ fontSize: 12 }}>Roles</span>
+          {ROLES.map((r) => (
+            <button key={r} type="button" className="btn btn-sm" style={roles.includes(r) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined} onClick={() => toggle(r)}>{ROLE_LABEL[r]}</button>
+          ))}
+          <span className="faint" style={{ fontSize: 12 }}>{roleSummary(roles)}</span>
+        </div>
+        <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? <span className="spinner" /> : <IconPlus />}Add person</button>
       </div>
     </div>
   );

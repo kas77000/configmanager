@@ -31,7 +31,7 @@ export async function main(): Promise<void> {
   if (process.env.NODE_ENV !== 'production') {
     const devUser = process.env[DEV_USER_ENV] || 'salavat';
     await users.ensure(devUser);
-    await users.setRole(devUser, 'admin');
+    await users.setRoles(devUser, ['admin']);
   }
 
   const reader = new StaticInstanceReader();

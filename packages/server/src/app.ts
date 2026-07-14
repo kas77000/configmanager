@@ -1,6 +1,6 @@
 import express, { type Express, type RequestHandler } from 'express';
 import type { ConfigRepo } from './git/repo';
-import { ROLES, type UserDirectory, canApprove, canEdit } from './store/users';
+import { ROLES, type Role, type UserDirectory, canApprove, canEdit, isAdmin } from './store/users';
 import type { AuditLog } from './store/audit';
 import type { Change, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
@@ -41,19 +41,16 @@ export function createApp(deps: AppDeps): Express {
   const api = express.Router();
   api.use(identityMiddleware(users, deps.identity));
 
-  function isAdmin(req: AuthedRequest, res: express.Response): boolean {
-    if (requireUser(req).role !== 'admin') {
-      res.status(403).json({ error: 'admin only' });
-      return false;
-    }
+  function requireAdmin(req: AuthedRequest, res: express.Response): boolean {
+    if (!isAdmin(requireUser(req).roles)) { res.status(403).json({ error: 'admin only' }); return false; }
     return true;
   }
   function requireEdit(req: AuthedRequest, res: express.Response): boolean {
-    if (!canEdit(requireUser(req).role)) { res.status(403).json({ error: 'you do not have permission to create or edit changes' }); return false; }
+    if (!canEdit(requireUser(req).roles)) { res.status(403).json({ error: 'you do not have permission to create or edit changes' }); return false; }
     return true;
   }
   function requireApprove(req: AuthedRequest, res: express.Response): boolean {
-    if (!canApprove(requireUser(req).role)) { res.status(403).json({ error: 'you do not have permission to approve changes' }); return false; }
+    if (!canApprove(requireUser(req).roles)) { res.status(403).json({ error: 'you do not have permission to approve changes' }); return false; }
     return true;
   }
   const author = (req: AuthedRequest) => {
@@ -65,40 +62,42 @@ export function createApp(deps: AppDeps): Express {
 
   // --- Users (admin) -------------------------------------------------------
   api.get('/users', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     res.json(await users.list());
   }));
+  const validRoles = (v: unknown): v is Role[] => Array.isArray(v) && v.every((r) => (ROLES as string[]).includes(r));
+
   api.post('/users', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const windowsId = String(req.body?.windowsId ?? '').trim();
-    const role = req.body?.role;
+    const roles = req.body?.roles ?? [];
     if (!windowsId) { res.status(400).json({ error: 'windowsId required' }); return; }
-    if (!ROLES.includes(role)) { res.status(400).json({ error: `role must be one of ${ROLES.join('|')}` }); return; }
+    if (!validRoles(roles)) { res.status(400).json({ error: `roles must be a subset of ${ROLES.join(', ')}` }); return; }
     const user = await users.upsert({
       windowsId,
       displayName: String(req.body?.displayName ?? '').trim() || windowsId,
       email: String(req.body?.email ?? '').trim(),
-      role,
+      roles,
     });
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'add-user', details: { user: windowsId, role } });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'add-user', details: { user: windowsId, roles } });
     res.status(201).json(user);
   }));
   api.patch('/users/:id', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const existing = await users.get(req.params.id);
     if (!existing) { res.status(404).json({ error: 'user not found' }); return; }
-    if (req.body?.role !== undefined && !ROLES.includes(req.body.role)) { res.status(400).json({ error: 'invalid role' }); return; }
+    if (req.body?.roles !== undefined && !validRoles(req.body.roles)) { res.status(400).json({ error: 'invalid roles' }); return; }
     const user = await users.upsert({
       windowsId: existing.windowsId,
       displayName: req.body?.displayName !== undefined ? String(req.body.displayName) : existing.displayName,
       email: req.body?.email !== undefined ? String(req.body.email) : existing.email,
-      role: req.body?.role !== undefined ? req.body.role : existing.role,
+      roles: req.body?.roles !== undefined ? (req.body.roles as Role[]) : existing.roles,
     });
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-user', details: { user: user.windowsId, role: user.role } });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-user', details: { user: user.windowsId, roles: user.roles } });
     res.json(user);
   }));
   api.delete('/users/:id', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const removed = await users.remove(req.params.id);
     if (!removed) { res.status(404).json({ error: 'user not found' }); return; }
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'remove-user', details: { user: req.params.id } });
@@ -109,7 +108,7 @@ export function createApp(deps: AppDeps): Express {
   api.get('/instances', wrap(async (_req, res) => res.json(await instances.list())));
 
   api.post('/instances', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const code = String(req.body?.code ?? '').trim();
     const environment = req.body?.environment;
     const uat = req.body?.uat === true;
@@ -135,7 +134,7 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.patch('/instances/:code', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const patch: { environment?: 'pilot' | 'production'; uat?: boolean } = {};
     if (req.body?.environment !== undefined) {
       if (req.body.environment !== 'pilot' && req.body.environment !== 'production') { res.status(400).json({ error: 'environment must be pilot|production' }); return; }
@@ -149,7 +148,7 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.delete('/instances/:code', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const code = req.params.code;
     if (!(await instances.has(code))) { res.status(404).json({ error: 'instance not found' }); return; }
     await instances.remove(code);
@@ -159,7 +158,7 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.post('/instances/:code/files', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const code = req.params.code;
     const file = String(req.body?.file ?? '').trim();
     const content = typeof req.body?.content === 'string' ? req.body.content : '';
@@ -175,7 +174,7 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.delete('/instances/:code/files/:file', wrap(async (req, res) => {
-    if (!isAdmin(req, res)) return;
+    if (!requireAdmin(req, res)) return;
     const updated = await instances.removeFile(req.params.code, req.params.file);
     if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'remove-file', branch: instanceBranch(req.params.code), details: { file: req.params.file } });
@@ -343,7 +342,7 @@ export function createApp(deps: AppDeps): Express {
     if (!change) { res.status(404).json({ error: 'change not found' }); return; }
     const kind = req.params.kind;
     if (kind !== 'approval' && kind !== 'recap') { res.status(404).json({ error: 'unknown email kind' }); return; }
-    const recipients = (await users.list()).filter((u) => canApprove(u.role) && u.email).map((u) => u.email);
+    const recipients = (await users.list()).filter((u) => canApprove(u.roles) && u.email).map((u) => u.email);
     const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl) : approvalEmail(change, recipients, deps.appBaseUrl);
     res.setHeader('Content-Type', 'message/rfc822');
     res.setHeader('Content-Disposition', `attachment; filename="change-${change.id}-${kind}.eml"`);
@@ -372,7 +371,7 @@ export function createApp(deps: AppDeps): Express {
 
     if (gate.errorCount > 0) {
       if (!override) { res.status(403).json({ error: 'blocked-by-errors', gate }); return; }
-      if (user.role !== 'admin') { res.status(403).json({ error: 'only an admin can override errors', gate }); return; }
+      if (!isAdmin(user.roles)) { res.status(403).json({ error: 'only an admin can override errors', gate }); return; }
       if (!overrideReason) { res.status(400).json({ error: 'overrideReason required to override errors', gate }); return; }
     }
     if (gate.warningCount > 0 && !acknowledgeWarnings) { res.status(409).json({ error: 'warnings-need-acknowledgement', gate }); return; }

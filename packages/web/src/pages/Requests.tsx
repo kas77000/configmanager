@@ -10,7 +10,7 @@ export default function Requests({ me }: { me: User | null }) {
   async function refresh() { setChanges(await api.changes()); }
   useEffect(() => { refresh().catch(() => setChanges([])); }, []);
 
-  const decide = canApprove(me?.role);
+  const decide = canApprove(me?.roles);
 
   async function run<T>(p: Promise<T>) {
     setErr(null);

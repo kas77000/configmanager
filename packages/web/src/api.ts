@@ -2,23 +2,27 @@ import type { Finding } from '@config-manager/rule-engine';
 
 export type { Finding };
 
-export type Role = 'admin' | 'approver' | 'editor' | 'stakeholder' | 'pending';
-export const ROLES: Role[] = ['admin', 'approver', 'editor', 'stakeholder', 'pending'];
-export interface User { windowsId: string; displayName: string; email: string; role: Role; }
+export type Role = 'admin' | 'editor' | 'stakeholder';
+export const ROLES: Role[] = ['admin', 'editor', 'stakeholder'];
+export interface User { windowsId: string; displayName: string; email: string; roles: Role[]; }
 
 export const ROLE_LABEL: Record<Role, string> = {
   admin: 'Admin',
-  approver: 'Boss (approver)',
-  editor: 'Quant (editor)',
+  editor: 'Quant',
   stakeholder: 'Stakeholder',
-  pending: 'Pending',
 };
 
-export function canEdit(role?: Role): boolean {
-  return role === 'admin' || role === 'approver' || role === 'editor';
+export function isAdmin(roles?: Role[]): boolean {
+  return !!roles?.includes('admin');
 }
-export function canApprove(role?: Role): boolean {
-  return role === 'admin' || role === 'approver' || role === 'stakeholder';
+export function canEdit(roles?: Role[]): boolean {
+  return !!roles && (roles.includes('admin') || roles.includes('editor'));
+}
+export function canApprove(roles?: Role[]): boolean {
+  return !!roles && (roles.includes('admin') || roles.includes('stakeholder'));
+}
+export function roleSummary(roles?: Role[]): string {
+  return roles && roles.length ? roles.map((r) => ROLE_LABEL[r]).join(', ') : 'Pending';
 }
 
 export type Environment = 'pilot' | 'production';
@@ -109,8 +113,8 @@ export const api = {
   commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 
   users: () => req<User[]>('GET', '/users'),
-  createUser: (body: { windowsId: string; displayName?: string; email?: string; role: Role }) => req<User>('POST', '/users', body),
-  updateUser: (id: string, patch: { displayName?: string; email?: string; role?: Role }) => req<User>('PATCH', `/users/${id}`, patch),
+  createUser: (body: { windowsId: string; displayName?: string; email?: string; roles: Role[] }) => req<User>('POST', '/users', body),
+  updateUser: (id: string, patch: { displayName?: string; email?: string; roles?: Role[] }) => req<User>('PATCH', `/users/${id}`, patch),
   deleteUser: (id: string) => req<{ deleted: boolean }>('DELETE', `/users/${id}`),
 
   changes: () => req<Change[]>('GET', '/changes'),

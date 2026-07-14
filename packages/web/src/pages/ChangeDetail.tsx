@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { KNOWN_FIELDS, analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
-import { ApiError, canApprove, canEdit, api, downloadEml, type Change, type ChangeTarget, type Gate, type User } from '../api';
+import { ApiError, canApprove, canEdit, isAdmin, api, downloadEml, type Change, type ChangeTarget, type Gate, type User } from '../api';
 import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
 import { IconCheck, IconMerge, IconPlus, IconX } from '../icons';
@@ -22,7 +22,7 @@ export default function ChangeDetail({ me }: { me: User | null }) {
 
   if (!change) return <div className="page"><div className="panel"><Skeleton rows={6} /></div></div>;
   const target = change.targets.find((t) => t.instance === active);
-  const canSeeConfig = canEdit(me?.role);
+  const canSeeConfig = canEdit(me?.roles);
 
   return (
     <div className="page">
@@ -65,8 +65,8 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const canSubmit = canEdit(me?.role) && (change.status === 'draft' || change.status === 'rejected');
-  const canDecide = canApprove(me?.role) && change.status === 'submitted';
+  const canSubmit = canEdit(me?.roles) && (change.status === 'draft' || change.status === 'rejected');
+  const canDecide = canApprove(me?.roles) && change.status === 'submitted';
 
   async function act(p: Promise<unknown>) {
     setBusy(true); setErr(null);
@@ -75,7 +75,7 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
     finally { setBusy(false); }
   }
 
-  const requester = canEdit(me?.role);
+  const requester = canEdit(me?.roles);
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
       <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
@@ -231,7 +231,7 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
             <span className="mono faint" style={{ fontSize: 12 }}>{activeFile}</span>
             {dirty && <span className="badge warning" style={{ fontSize: 11 }}>unsaved</span>}
             <input className="input" style={{ height: 26, flex: 1, minWidth: 80 }} placeholder="commit message" value={message} onChange={(e) => setMessage(e.target.value)} disabled={merged} />
-            <button className="btn btn-sm btn-primary" onClick={save} disabled={!dirty || saving || merged || me?.role === 'pending'}>{saving ? <span className="spinner" /> : null}Save</button>
+            <button className="btn btn-sm btn-primary" onClick={save} disabled={!dirty || saving || merged || !canEdit(me?.roles)}>{saving ? <span className="spinner" /> : null}Save</button>
             <button className="btn btn-sm" onClick={toggleDiff}>{showDiff ? 'Hide diff' : 'Diff'}</button>
           </div>
           <div className="editor-toolbar" style={{ gap: 6, flexWrap: 'wrap' }}>
@@ -322,7 +322,7 @@ function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVer
   const [conflicts, setConflicts] = useState<string[] | null>(null);
   const [done, setDone] = useState(false);
 
-  const isAdmin = me?.role === 'admin';
+  const admin = isAdmin(me?.roles);
   const hasErrors = gate.errorCount > 0;
   const hasWarnings = gate.warningCount > 0;
   const hasFixmsg = target.files.includes(FIXMSG);
@@ -344,7 +344,7 @@ function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVer
       if (e instanceof ApiError) {
         if (e.body?.gate) setGate(e.body.gate as Gate);
         if (e.body?.error === 'merge-conflict') setConflicts(e.body.conflicts ?? []);
-        setError(messageFor(e.body?.error, isAdmin));
+        setError(messageFor(e.body?.error, admin));
       } else setError('Merge failed.');
     } finally { setBusy(false); }
   }
@@ -357,7 +357,7 @@ function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVer
           <GateSummary error={gate.errorCount} warning={gate.warningCount} info={gate.infoCount} />
         </div>
         <button className="btn btn-primary" onClick={merge}
-          disabled={busy || anyDirty || !approved || (hasWarnings && !ack) || (hasErrors && !(isAdmin && override && reason.trim()))}>
+          disabled={busy || anyDirty || !approved || (hasWarnings && !ack) || (hasErrors && !(admin && override && reason.trim()))}>
           {busy ? <span className="spinner" /> : <IconMerge />}Merge
         </button>
       </div>
@@ -374,8 +374,8 @@ function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVer
 
       {hasErrors && (
         <div style={{ marginTop: 10 }}>
-          <Banner kind="error">This version has {gate.errorCount} blocking error{gate.errorCount > 1 ? 's' : ''}.{isAdmin ? ' As an admin you may override with a recorded reason.' : ' Only an admin can override.'}</Banner>
-          {isAdmin && (
+          <Banner kind="error">This version has {gate.errorCount} blocking error{gate.errorCount > 1 ? 's' : ''}.{admin ? ' As an admin you may override with a recorded reason.' : ' Only an admin can override.'}</Banner>
+          {admin && (
             <div style={{ marginTop: 10 }}>
               <label className="hstack" style={{ cursor: 'pointer', marginBottom: 8 }}><input type="checkbox" checked={override} onChange={(e) => setOverride(e.target.checked)} /><span>Override the merge gate</span></label>
               {override && <label className="field"><span>Override reason (recorded in the audit log)</span><input className="input" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. accepted risk, tracked in JIRA-1234" /></label>}

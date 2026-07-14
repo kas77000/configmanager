@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { api, type Environment, type InstanceInfo, type User } from '../api';
+import { api, isAdmin, type Environment, type InstanceInfo, type User } from '../api';
 import { Skeleton } from '../components';
 import { IconPlus, IconTrash, IconX } from '../icons';
 
@@ -13,7 +13,7 @@ export default function Admin({ me }: { me: User | null }) {
   }
   useEffect(() => { refresh().catch(() => setInstances([])); }, []);
 
-  if (me && me.role !== 'admin') {
+  if (me && !isAdmin(me.roles)) {
     return <div className="page"><div className="panel"><div className="empty">Admin only.</div></div></div>;
   }
 

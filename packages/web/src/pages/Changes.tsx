@@ -14,7 +14,7 @@ export default function Changes({ me }: { me: User | null }) {
     api.instances().then(setInstances).catch(() => setInstances([]));
   }, []);
 
-  const canCreate = canEdit(me?.role);
+  const canCreate = canEdit(me?.roles);
 
   return (
     <div className="page">

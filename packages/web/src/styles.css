@@ -120,7 +120,7 @@ h3 { font-size: 13px; }
 .sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 
 .main { overflow: auto; height: 100%; }
-.page { max-width: 1180px; margin: 0 auto; padding: 24px 28px 64px; }
+.page { max-width: 1560px; margin: 0 auto; padding: 28px 40px 72px; }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .page-head p { margin: 4px 0 0; color: var(--muted); }
 .eyebrow { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--faint); font-weight: 600; }

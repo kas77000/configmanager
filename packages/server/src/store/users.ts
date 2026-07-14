@@ -1,30 +1,36 @@
 import { JsonStore } from './json-store';
 
 /**
- * admin      = app owner (manage users/instances, do everything)
- * approver   = boss (create/review changes AND approve/reject)
+ * A person can hold several roles (a "boss" is simply quant + stakeholder).
+ * admin      = app owner (manage users/instances; implies edit + approve)
  * editor     = quant team (create + review changes)
- * stakeholder= approve/reject only; sees request description + instances, not the config
- * pending    = unassigned
+ * stakeholder= approve/reject requests; sees description + instances, not the config
+ * No roles   = pending (unassigned).
  */
-export type Role = 'admin' | 'approver' | 'editor' | 'stakeholder' | 'pending';
+export type Role = 'admin' | 'editor' | 'stakeholder';
 
-export const ROLES: Role[] = ['admin', 'approver', 'editor', 'stakeholder', 'pending'];
+export const ROLES: Role[] = ['admin', 'editor', 'stakeholder'];
 
+export function isAdmin(roles: Role[]): boolean {
+  return roles.includes('admin');
+}
 /** Can create and edit changes / config. */
-export function canEdit(role: Role): boolean {
-  return role === 'admin' || role === 'approver' || role === 'editor';
+export function canEdit(roles: Role[]): boolean {
+  return roles.includes('admin') || roles.includes('editor');
 }
 /** Can approve or reject a submitted change. */
-export function canApprove(role: Role): boolean {
-  return role === 'admin' || role === 'approver' || role === 'stakeholder';
+export function canApprove(roles: Role[]): boolean {
+  return roles.includes('admin') || roles.includes('stakeholder');
+}
+export function isPending(roles: Role[]): boolean {
+  return roles.length === 0;
 }
 
 export interface User {
   windowsId: string;
   displayName: string;
   email: string;
-  role: Role;
+  roles: Role[];
 }
 
 /** Lightweight directory of people (not credentials): Windows ID -> name, email, role. */
@@ -41,26 +47,25 @@ export class UserDirectory {
 
   /**
    * Returns the user for a Windows ID, auto-registering an unknown one. The very first user
-   * to connect becomes `admin` (bootstrap); everyone after that is `pending` until assigned.
+   * to connect becomes `admin` (bootstrap); everyone after that starts pending (no roles).
    */
   async ensure(windowsId: string): Promise<User> {
     return this.store.update((users) => {
       let user = users.find((u) => u.windowsId === windowsId);
       if (!user) {
-        const role: Role = users.length === 0 ? 'admin' : 'pending';
-        user = { windowsId, displayName: windowsId, email: '', role };
+        user = { windowsId, displayName: windowsId, email: '', roles: users.length === 0 ? ['admin'] : [] };
         users.push(user);
       }
-      return { ...user };
+      return { ...user, roles: [...user.roles] };
     });
   }
 
-  async setRole(windowsId: string, role: Role): Promise<User | undefined> {
+  async setRoles(windowsId: string, roles: Role[]): Promise<User | undefined> {
     return this.store.update((users) => {
       const user = users.find((u) => u.windowsId === windowsId);
       if (!user) return undefined;
-      user.role = role;
-      return { ...user };
+      user.roles = roles;
+      return { ...user, roles: [...user.roles] };
     });
   }
 
