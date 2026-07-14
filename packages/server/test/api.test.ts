@@ -55,14 +55,17 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('lists all instances with their environment (APIH is UAT)', async () => {
+  it('lists all instances with environment and UAT flag', async () => {
     const h = await makeHarness();
     const list = await as(h.app, 'ed')('get', '/api/instances').expect(200);
-    const codes = list.body.map((i: { code: string }) => i.code);
-    expect(codes).toContain('APIA');
-    expect(codes).toContain('APIM');
-    const uat = list.body.find((i: { code: string }) => i.code === 'APIH');
-    expect(uat.environment).toBe('uat');
+    const byCode = Object.fromEntries(
+      list.body.map((i: { code: string }) => [i.code, i]),
+    ) as Record<string, { environment: string; uat: boolean }>;
+    expect(byCode.APIH).toMatchObject({ environment: 'pilot', uat: true });
+    expect(byCode.APIC).toMatchObject({ environment: 'pilot', uat: false });
+    expect(byCode.APIF.environment).toBe('pilot');
+    expect(byCode.APIG.environment).toBe('pilot');
+    expect(byCode.APIA).toMatchObject({ environment: 'production', uat: false });
     const file = await as(h.app, 'ed')('get', '/api/instances/APIA/file').expect(200);
     expect(file.body.content).toBe(CLEAN);
     await rm(h.dir, { recursive: true, force: true });

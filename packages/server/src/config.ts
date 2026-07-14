@@ -25,36 +25,32 @@ export function changeBranch(changeId: string, code: string): string {
   return `change/${changeId}/${code}`;
 }
 
-/** Deployment tier of an instance. Pilot instances roll out first; APIH is the UAT box. */
-export type Environment = 'pilot' | 'uat' | 'production';
+/** Rollout tier of an instance. Pilots roll out first, then production. */
+export type Environment = 'pilot' | 'production';
 
-/**
- * Environment per instance. APIH is fixed as UAT. The pilot/production split below is a
- * PLACEHOLDER to be confirmed by the team — adjust these values to the real classification.
- */
-export const INSTANCE_ENVIRONMENTS: Record<Instance, Environment> = {
-  APIH: 'uat',
-  APIA: 'production',
-  APIB: 'production',
-  APIC: 'production',
-  APID: 'production',
-  APIE: 'production',
-  APIF: 'production',
-  APIG: 'production',
-  APII: 'production',
-  APIJ: 'production',
-  APIK: 'production',
-  APIL: 'production',
-  APIM: 'production',
-};
+/** Pilot instances (roll out first). APIH is a pilot that also serves as UAT. */
+export const PILOT_INSTANCES: readonly Instance[] = ['APIC', 'APIF', 'APIG', 'APIH'];
+
+/** The single UAT instance. */
+export const UAT_INSTANCE: Instance = 'APIH';
+
+export function environmentOf(code: Instance): Environment {
+  return PILOT_INSTANCES.includes(code) ? 'pilot' : 'production';
+}
 
 export interface InstanceInfo {
   code: Instance;
   environment: Environment;
+  /** True for the UAT instance (APIH). */
+  uat: boolean;
 }
 
 export function instanceInfos(): InstanceInfo[] {
-  return INSTANCES.map((code) => ({ code, environment: INSTANCE_ENVIRONMENTS[code] }));
+  return INSTANCES.map((code) => ({
+    code,
+    environment: environmentOf(code),
+    uat: code === UAT_INSTANCE,
+  }));
 }
 
 /** HTTP header the reverse proxy sets with the authenticated Windows identity. */

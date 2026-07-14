@@ -74,10 +74,10 @@ Two clarifications reshaped the version model after the initial design:
    instance branch — identical content is a no-op). Copying changes *onto* instances stays a
    manual/out-of-app step in Phase 1.
 
-4. **Instance environments.** Each instance has an environment — `pilot`, `uat`, or
-   `production`. **APIH is UAT.** The pilot/production split is configurable metadata
-   (placeholder until the team confirms it) and is exposed on `GET /instances` for the
-   workflow to use (e.g. pilot-first rollout).
+4. **Instance environments.** Each instance has a rollout tier — `pilot` or `production` —
+   plus a `uat` flag. **Pilots: APIC, APIF, APIG, APIH; APIH is also the UAT instance;
+   everything else is production.** Exposed on `GET /instances` for the workflow (e.g.
+   pilot-first rollout, UAT sign-off).
 
 5. **Multi-config ready.** A change targets `(instance, file)` pairs; Phase 1 operates the
    single `ai.fixmsg.properties`, but the model carries `file` so several configs across
