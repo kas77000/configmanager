@@ -12,32 +12,38 @@ const TABLE = 'border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;fo
 const TH = 'border:1px solid #c8c8c8;background:#f2f2f2;padding:6px 10px;text-align:left';
 const TD = 'border:1px solid #c8c8c8;padding:6px 10px;vertical-align:top';
 
-function shell(title: string, intro: string, body: string, link: string): string {
+function shell(intro: string, table: string, link: string, sender: string): string {
   return [
     `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a">`,
+    `<p>Hi Team,</p>`,
     `<p>${esc(intro)}</p>`,
-    body,
-    `<p style="margin-top:16px"><a href="${esc(link)}" style="color:#3538cd">Open in Configuration Manager</a></p>`,
-    `<p style="color:#777;font-size:12px">Sent from Configuration Manager. ${esc(title)}</p>`,
+    table,
+    `<p style="margin-top:14px"><a href="${esc(link)}" style="color:#3538cd">Open in Configuration Manager</a></p>`,
+    `<p style="margin-top:16px">Thanks and Regards,<br>${esc(sender)}</p>`,
     `</div>`,
   ].join('\n');
 }
 
-export function approvalEmail(change: Change, recipients: string[], cc: string[], appBaseUrl: string): BuiltEmail {
+export function approvalEmail(change: Change, recipients: string[], cc: string[], appBaseUrl: string, sender: string): BuiltEmail {
   const rows = change.items
     .map((it) => `<tr><td style="${TD}">${esc(it.description)}</td><td style="${TD}">${esc(it.file)}</td><td style="${TD}">${esc(it.instances.join(', '))}</td></tr>`)
     .join('');
   const table = `<table style="${TABLE}"><tr><th style="${TH}">Description</th><th style="${TH}">Config Changed</th><th style="${TH}">Newly applies to instances</th></tr>${rows}</table>`;
   const link = `${appBaseUrl.replace(/\/$/, '')}/changes/${change.id}`;
+  const intro = change.effectiveDate
+    ? `Could you please approve the following modifications of config effective for trading on ${change.effectiveDate}.`
+    : 'Could you please approve the following configuration modifications.';
   return {
     to: recipients,
     cc,
-    subject: `Config change request ${change.id}: ${change.description}`,
-    html: shell(`Change ${change.id}`, 'Please review and approve or reject the following configuration change:', table, link),
+    subject: change.effectiveDate
+      ? `Config changes request for ${change.effectiveDate}: ${change.description}`
+      : `Config change request ${change.id}: ${change.description}`,
+    html: shell(intro, table, link, sender),
   };
 }
 
-export function recapEmail(change: Change, appBaseUrl: string): BuiltEmail {
+export function recapEmail(change: Change, appBaseUrl: string, sender: string): BuiltEmail {
   const jira = change.jiraTickets ?? [];
   const rows = change.items
     .map((it) => {
@@ -48,10 +54,15 @@ export function recapEmail(change: Change, appBaseUrl: string): BuiltEmail {
     .join('');
   const table = `<table style="${TABLE}"><tr><th style="${TH}">Description</th><th style="${TH}">Config Changed</th><th style="${TH}">Applied to instances</th><th style="${TH}">JIRA</th></tr>${rows}</table>`;
   const link = `${appBaseUrl.replace(/\/$/, '')}/changes/${change.id}`;
+  const intro = change.effectiveDate
+    ? `Below changes are applied and will be effective for trading on ${change.effectiveDate}.`
+    : 'The following configuration changes have been reviewed, approved, and applied.';
   return {
     to: [],
-    subject: `Config change ${change.id} applied: ${change.description}`,
-    html: shell(`Change ${change.id}`, 'The following configuration change has been reviewed, approved, and applied:', table, link),
+    subject: change.effectiveDate
+      ? `${change.description} effective for ${change.effectiveDate} trading`
+      : `Config change ${change.id} applied: ${change.description}`,
+    html: shell(intro, table, link, sender),
   };
 }
 

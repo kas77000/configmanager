@@ -85,7 +85,7 @@ function RequestCard({ c, decide, run }: { c: Change; decide: boolean; run: <T>(
             <ChangeStatusBadge status={c.status} />
             {(c.jiraTickets ?? []).map((t) => <a key={t.key} className="tag mono" href={t.url} target="_blank" rel="noreferrer" title={t.file} style={{ color: 'var(--accent)' }}>{t.key}</a>)}
           </div>
-          <div style={{ fontSize: 14, marginBottom: 6 }}>{c.description}</div>
+          <div style={{ fontSize: 14, marginBottom: 6 }}>{c.description}{c.effectiveDate && <span className="faint" style={{ fontWeight: 400 }}> · effective {c.effectiveDate}</span>}</div>
           <div className="faint" style={{ fontSize: 12 }}>
             Requested by <span className="mono">{c.submittedBy ?? c.createdBy}</span>{c.submittedAt ? ` · ${relTime(c.submittedAt)}` : ''}
           </div>

@@ -38,7 +38,7 @@ export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'me
 export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
 export interface JiraTicket { file: string; key: string; url: string; }
 export interface Change {
-  id: string; description: string; items: ChangeItem[]; createdBy: string; createdAt: string;
+  id: string; description: string; effectiveDate?: string; items: ChangeItem[]; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
   submittedBy?: string; submittedAt?: string; jiraTickets?: JiraTicket[]; decision?: ChangeDecision;
 }
@@ -127,7 +127,7 @@ export const api = {
   deleteUser: (id: string) => req<{ deleted: boolean }>('DELETE', `/users/${id}`),
 
   changes: () => req<Change[]>('GET', '/changes'),
-  createChange: (description: string, items: ChangeItem[]) => req<Change>('POST', '/changes', { description, items }),
+  createChange: (description: string, items: ChangeItem[], effectiveDate?: string) => req<Change>('POST', '/changes', { description, items, effectiveDate }),
   change: (id: string) => req<Change>('GET', `/changes/${id}`),
   cancelChange: (id: string) => req<Change>('POST', `/changes/${id}/cancel`, {}),
   submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),

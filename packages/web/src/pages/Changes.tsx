@@ -43,10 +43,11 @@ export default function Changes({ me }: { me: User | null }) {
               <tr>
                 <th style={{ width: 70 }}>ID</th>
                 <th>Change</th>
-                <th style={{ width: 90 }}>Files</th>
-                <th style={{ width: 200 }}>Instances</th>
+                <th style={{ width: 110 }}>Effective</th>
+                <th style={{ width: 70 }}>Files</th>
+                <th style={{ width: 180 }}>Instances</th>
                 <th style={{ width: 90 }}>Status</th>
-                <th style={{ width: 110 }}>Created</th>
+                <th style={{ width: 100 }}>Created</th>
               </tr>
             </thead>
             <tbody>
@@ -66,6 +67,7 @@ function ChangeRow({ c }: { c: Change }) {
     <tr className="rowlink" onClick={() => nav(`/changes/${c.id}`)}>
       <td className="mono" style={{ fontWeight: 600 }}>{c.id}</td>
       <td>{c.description}</td>
+      <td className="mono" style={{ fontSize: 12 }}>{c.effectiveDate ?? <span className="faint">—</span>}</td>
       <td className="mono faint" style={{ fontSize: 12 }}>{files.length}</td>
       <td className="mono faint" style={{ fontSize: 12 }}>{c.targets.map((t) => t.instance).join(', ')}</td>
       <td><ChangeStatusBadge status={c.status} /></td>
@@ -79,6 +81,7 @@ interface DraftItem { file: string; description: string; instances: string[] }
 function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCancel: () => void }) {
   const nav = useNavigate();
   const [title, setTitle] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState('');
   const [items, setItems] = useState<DraftItem[]>([{ file: '', description: '', instances: [] }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -99,13 +102,13 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
     setItem(idx, { instances: cur.includes(code) ? cur.filter((x) => x !== code) : [...cur, code] });
   }
 
-  const valid = title.trim().length > 0 && items.length > 0 &&
+  const valid = title.trim().length > 0 && effectiveDate.length > 0 && items.length > 0 &&
     items.every((it) => it.file && it.description.trim() && it.instances.length > 0);
 
   async function submit() {
     setBusy(true); setErr(null);
     try {
-      const change = await api.createChange(title.trim(), items.map((it) => ({ file: it.file, description: it.description.trim(), instances: it.instances })));
+      const change = await api.createChange(title.trim(), items.map((it) => ({ file: it.file, description: it.description.trim(), instances: it.instances })), effectiveDate);
       nav(`/changes/${change.id}`);
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not create the change.'); setBusy(false); }
   }
@@ -117,11 +120,18 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
   return (
     <div className="panel" style={{ padding: 24, marginBottom: 24 }}>
       <div className="stack" style={{ gap: 24 }}>
-        <label style={{ display: 'block', maxWidth: 560 }}>
-          <span style={label}>Change title</span>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout: restrict Post layering" />
-          <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>A short name for the whole change. Each file gets its own description below.</span>
-        </label>
+        <div className="hstack" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <label style={{ display: 'block', flex: 1, minWidth: 300 }}>
+            <span style={label}>Change title</span>
+            <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout: restrict Post layering" />
+            <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>A short name for the whole change. Each file gets its own description below.</span>
+          </label>
+          <label style={{ display: 'block', flex: '0 0 190px' }}>
+            <span style={label}>Effective date</span>
+            <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
+            <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>When it takes effect for trading.</span>
+          </label>
+        </div>
 
         <div>
           <div className="row-between" style={{ marginBottom: 14 }}>
@@ -176,7 +186,7 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
         <div className="hstack" style={{ gap: 10, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
           <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Create change</button>
           <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Give the change a title, and each modification a file, a description, and at least one instance.</span>}
+          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Give the change a title and effective date, and each modification a file, a description, and at least one instance.</span>}
         </div>
       </div>
     </div>

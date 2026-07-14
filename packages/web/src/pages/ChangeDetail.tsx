@@ -30,7 +30,7 @@ export default function ChangeDetail({ me }: { me: User | null }) {
         <div>
           <div className="eyebrow">Change {change.id}</div>
           <h1>{change.description}</h1>
-          <p>Opened by <span className="mono">{change.createdBy}</span> · {change.targets.length} instance{change.targets.length > 1 ? 's' : ''}</p>
+          <p>Opened by <span className="mono">{change.createdBy}</span> · {change.targets.length} instance{change.targets.length > 1 ? 's' : ''}{change.effectiveDate ? <> · effective <span className="mono">{change.effectiveDate}</span></> : ''}</p>
         </div>
       </div>
 

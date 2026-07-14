@@ -238,6 +238,7 @@ export function createApp(deps: AppDeps): Express {
     if (!requireEdit(req, res)) return;
     const description = String(req.body?.description ?? '').trim();
     if (!description) { res.status(400).json({ error: 'a change title (description) is required' }); return; }
+    const effectiveDate = req.body?.effectiveDate ? String(req.body.effectiveDate) : undefined;
 
     let items: ChangeItem[];
     if (Array.isArray(req.body?.items) && req.body.items.length) {
@@ -266,7 +267,7 @@ export function createApp(deps: AppDeps): Express {
       }
     }
 
-    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, items });
+    const change = await changes.create({ description, effectiveDate, createdBy: requireUser(req).windowsId, items });
     for (const t of change.targets) await repo.createBranch(t.branch, instanceBranch(t.instance));
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: change.targets.map((t) => t.instance) } });
     res.status(201).json(change);
@@ -393,7 +394,8 @@ export function createApp(deps: AppDeps): Express {
     if (kind !== 'approval' && kind !== 'recap') { res.status(404).json({ error: 'unknown email kind' }); return; }
     const recipients = (await users.list()).filter((u) => canApprove(u.roles) && u.email).map((u) => u.email);
     const distro = (await deps.settings.get()).quantDistributionEmail;
-    const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl) : approvalEmail(change, recipients, distro ? [distro] : [], deps.appBaseUrl);
+    const sender = requireUser(req).displayName || requireUser(req).windowsId;
+    const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl, sender) : approvalEmail(change, recipients, distro ? [distro] : [], deps.appBaseUrl, sender);
     res.setHeader('Content-Type', 'message/rfc822');
     res.setHeader('Content-Disposition', `attachment; filename="change-${change.id}-${kind}.eml"`);
     res.send(toEml(email));

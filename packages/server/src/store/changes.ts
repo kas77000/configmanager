@@ -33,6 +33,8 @@ export interface Change {
   id: string;
   /** Short title for the whole change (shown in lists and the email subject). */
   description: string;
+  /** Date the change becomes effective for trading (YYYY-MM-DD). */
+  effectiveDate?: string;
   /** Per-file modifications, each with its own description and instances. */
   items: ChangeItem[];
   createdBy: string;
@@ -48,6 +50,7 @@ export interface Change {
 
 export interface NewChange {
   description: string;
+  effectiveDate?: string;
   createdBy: string;
   items: ChangeItem[];
 }
@@ -72,6 +75,7 @@ export class ChangeStore {
       const change: Change = {
         id,
         description: input.description,
+        effectiveDate: input.effectiveDate,
         items: input.items,
         createdBy: input.createdBy,
         createdAt: this.now().toISOString(),
