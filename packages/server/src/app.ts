@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from 'express';
 import type { ConfigRepo } from './git/repo';
 import type { UserDirectory } from './store/users';
 import type { AuditLog } from './store/audit';
-import type { Change, ChangeStore } from './store/changes';
+import type { Change, ChangeStore, ChangeTarget } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
@@ -27,11 +27,6 @@ const wrap =
   (req, res, next) => {
     fn(req as AuthedRequest, res).catch(next);
   };
-
-function targetBranch(change: Change, instance: string): string | null {
-  const t = change.targets.find((x) => x.instance === instance);
-  return t ? t.branch : null;
-}
 
 export function createApp(deps: AppDeps): Express {
   const { repo, users, audit, changes, instances, reader } = deps;
@@ -188,17 +183,23 @@ export function createApp(deps: AppDeps): Express {
   api.post('/changes', wrap(async (req, res) => {
     if (denyPending(req, res)) return;
     const description = String(req.body?.description ?? '').trim();
-    const list: unknown = req.body?.instances;
+    const instList: unknown = req.body?.instances;
+    const fileList: unknown = req.body?.files;
     if (!description) { res.status(400).json({ error: 'description required' }); return; }
-    if (!Array.isArray(list) || list.length === 0) { res.status(400).json({ error: 'instances (non-empty array) required' }); return; }
-    const codes = list.map(String);
-    const known = await Promise.all(codes.map((c) => instances.has(c)));
-    const bad = codes.filter((_, i) => !known[i]);
-    if (bad.length) { res.status(400).json({ error: `unknown instances: ${bad.join(', ')}` }); return; }
+    if (!Array.isArray(instList) || instList.length === 0) { res.status(400).json({ error: 'instances (non-empty array) required' }); return; }
+    const codes = instList.map(String);
+    const files = Array.isArray(fileList) && fileList.length ? fileList.map(String) : [MANAGED_FILE];
 
-    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, instances: codes });
+    for (const code of codes) {
+      const inst = await instances.get(code);
+      if (!inst) { res.status(400).json({ error: `unknown instance: ${code}` }); return; }
+      const missing = files.filter((f) => !inst.files.includes(f));
+      if (missing.length) { res.status(400).json({ error: `${code} does not manage: ${missing.join(', ')}` }); return; }
+    }
+
+    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, instances: codes, files });
     for (const t of change.targets) await repo.createBranch(t.branch, instanceBranch(t.instance));
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: codes } });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: codes, files } });
     res.status(201).json(change);
   }));
 
@@ -208,49 +209,74 @@ export function createApp(deps: AppDeps): Express {
     res.json(change);
   }));
 
-  const resolve = async (req: AuthedRequest, res: express.Response): Promise<{ change: Change; instance: string; branch: string } | null> => {
+  const resolveTarget = async (req: AuthedRequest, res: express.Response): Promise<{ change: Change; target: ChangeTarget } | null> => {
     const change = await changes.get(req.params.id);
     if (!change) { res.status(404).json({ error: 'change not found' }); return null; }
-    const branch = targetBranch(change, req.params.code);
-    if (!branch) { res.status(404).json({ error: 'instance not part of this change' }); return null; }
-    return { change, instance: req.params.code, branch };
+    const target = change.targets.find((t) => t.instance === req.params.code);
+    if (!target) { res.status(404).json({ error: 'instance not part of this change' }); return null; }
+    return { change, target };
   };
 
-  api.get('/changes/:id/instances/:code/file', wrap(async (req, res) => {
-    const ctx = await resolve(req, res); if (!ctx) return;
-    res.json({ instance: ctx.instance, content: await repo.readFile(ctx.branch) });
+  const resolveFile = async (req: AuthedRequest, res: express.Response): Promise<{ change: Change; target: ChangeTarget; file: string } | null> => {
+    const ctx = await resolveTarget(req, res);
+    if (!ctx) return null;
+    const file = req.params.file;
+    if (!ctx.target.files.includes(file)) { res.status(404).json({ error: 'file not part of this change for this instance' }); return null; }
+    return { ...ctx, file };
+  };
+
+  // Aggregate the merge gate across an instance target's fixmsg files.
+  const instanceGate = async (target: ChangeTarget) => {
+    const gate = { findings: [] as ReturnType<typeof evaluateGate>['findings'], errorCount: 0, warningCount: 0, infoCount: 0 };
+    for (const file of target.files) {
+      if (file !== MANAGED_FILE) continue; // shadow-analysis is specific to ai.fixmsg.properties
+      const g = evaluateGate(await repo.readNamedFile(target.branch, file));
+      gate.findings.push(...g.findings);
+      gate.errorCount += g.errorCount;
+      gate.warningCount += g.warningCount;
+      gate.infoCount += g.infoCount;
+    }
+    return gate;
+  };
+
+  api.get('/changes/:id/instances/:code/files/:file', wrap(async (req, res) => {
+    const ctx = await resolveFile(req, res); if (!ctx) return;
+    res.json({ instance: ctx.target.instance, file: ctx.file, content: await repo.readNamedFile(ctx.target.branch, ctx.file) });
   }));
 
-  api.put('/changes/:id/instances/:code/file', wrap(async (req, res) => {
+  api.put('/changes/:id/instances/:code/files/:file', wrap(async (req, res) => {
     if (denyPending(req, res)) return;
-    const ctx = await resolve(req, res); if (!ctx) return;
+    const ctx = await resolveFile(req, res); if (!ctx) return;
     const content = req.body?.content;
     const message = String(req.body?.message ?? '').trim();
     if (typeof content !== 'string') { res.status(400).json({ error: 'content (string) required' }); return; }
     if (!message) { res.status(400).json({ error: 'message required' }); return; }
-    const commit = await repo.writeCommit(ctx.branch, content, author(req), message);
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'edit', branch: ctx.branch, commit, details: { changeId: ctx.change.id, instance: ctx.instance } });
-    res.json({ instance: ctx.instance, commit });
+    const commit = await repo.commitFile(ctx.target.branch, ctx.file, content, author(req), message);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'edit', branch: ctx.target.branch, commit, details: { changeId: ctx.change.id, instance: ctx.target.instance, file: ctx.file } });
+    res.json({ instance: ctx.target.instance, file: ctx.file, commit });
   }));
 
-  api.get('/changes/:id/instances/:code/diff', wrap(async (req, res) => {
-    const ctx = await resolve(req, res); if (!ctx) return;
-    res.json({ instance: ctx.instance, diff: await repo.diff(ctx.branch, instanceBranch(ctx.instance)) });
+  api.get('/changes/:id/instances/:code/files/:file/diff', wrap(async (req, res) => {
+    const ctx = await resolveFile(req, res); if (!ctx) return;
+    res.json({ instance: ctx.target.instance, file: ctx.file, diff: await repo.diffNamed(ctx.target.branch, instanceBranch(ctx.target.instance), ctx.file) });
   }));
 
-  api.get('/changes/:id/instances/:code/analysis', wrap(async (req, res) => {
-    const ctx = await resolve(req, res); if (!ctx) return;
-    res.json({ instance: ctx.instance, ...evaluateGate(await repo.readFile(ctx.branch)) });
+  api.get('/changes/:id/instances/:code/files/:file/analysis', wrap(async (req, res) => {
+    const ctx = await resolveFile(req, res); if (!ctx) return;
+    const gate = ctx.file === MANAGED_FILE
+      ? evaluateGate(await repo.readNamedFile(ctx.target.branch, ctx.file))
+      : { findings: [], errorCount: 0, warningCount: 0, infoCount: 0 };
+    res.json({ instance: ctx.target.instance, file: ctx.file, ...gate });
   }));
 
   api.post('/changes/:id/instances/:code/merge', wrap(async (req, res) => {
     const user = requireUser(req);
     if (denyPending(req, res)) return;
-    const ctx = await resolve(req, res); if (!ctx) return;
+    const ctx = await resolveTarget(req, res); if (!ctx) return;
     const acknowledgeWarnings = req.body?.acknowledgeWarnings === true;
     const override = req.body?.override === true;
     const overrideReason = String(req.body?.overrideReason ?? '').trim();
-    const gate = evaluateGate(await repo.readFile(ctx.branch));
+    const gate = await instanceGate(ctx.target);
 
     if (gate.errorCount > 0) {
       if (!override) { res.status(403).json({ error: 'blocked-by-errors', gate }); return; }
@@ -259,19 +285,19 @@ export function createApp(deps: AppDeps): Express {
     }
     if (gate.warningCount > 0 && !acknowledgeWarnings) { res.status(409).json({ error: 'warnings-need-acknowledgement', gate }); return; }
 
-    const result = await repo.merge(ctx.branch, author(req), instanceBranch(ctx.instance));
+    const result = await repo.merge(ctx.target.branch, author(req), instanceBranch(ctx.target.instance));
     if (!result.ok) { res.status(409).json({ error: 'merge-conflict', conflicts: result.conflicts }); return; }
-    await changes.markMerged(ctx.change.id, ctx.instance, result.commit!);
+    await changes.markMerged(ctx.change.id, ctx.target.instance, result.commit!);
     await audit.append({
-      windowsId: user.windowsId, ip: req.ip, action: 'merge', branch: instanceBranch(ctx.instance), commit: result.commit,
+      windowsId: user.windowsId, ip: req.ip, action: 'merge', branch: instanceBranch(ctx.target.instance), commit: result.commit,
       details: {
-        changeId: ctx.change.id, instance: ctx.instance,
+        changeId: ctx.change.id, instance: ctx.target.instance,
         acknowledgedWarnings: acknowledgeWarnings && gate.warningCount > 0,
         override: override && gate.errorCount > 0,
         overrideReason: override && gate.errorCount > 0 ? overrideReason : undefined,
       },
     });
-    res.json({ merged: true, instance: ctx.instance, commit: result.commit });
+    res.json({ merged: true, instance: ctx.target.instance, commit: result.commit });
   }));
 
   // --- Commits & history ---------------------------------------------------

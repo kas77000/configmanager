@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type Change, type InstanceInfo, type User } from '../api';
 import { EnvTag, Skeleton, UatTag, relTime } from '../components';
@@ -84,24 +84,40 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
   const nav = useNavigate();
   const [description, setDescription] = useState('');
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [pickedFiles, setPickedFiles] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function toggle(code: string) {
-    setPicked((s) => {
-      const n = new Set(s);
-      n.has(code) ? n.delete(code) : n.add(code);
-      return n;
+  // Files a change can target = those managed by EVERY selected instance.
+  const availableFiles = useMemo(() => {
+    const chosen = instances.filter((i) => picked.has(i.code));
+    if (chosen.length === 0) return [];
+    return chosen.reduce<string[]>((acc, i, idx) => (idx === 0 ? [...i.files] : acc.filter((f) => i.files.includes(f))), []);
+  }, [instances, picked]);
+
+  // Keep the file selection valid as instances change; default-select ai.fixmsg.properties.
+  useEffect(() => {
+    setPickedFiles((prev) => {
+      const next = new Set([...prev].filter((f) => availableFiles.includes(f)));
+      if (next.size === 0 && availableFiles.includes('ai.fixmsg.properties')) next.add('ai.fixmsg.properties');
+      return next;
     });
+  }, [availableFiles]);
+
+  function toggle(set: Set<string>, setter: (s: Set<string>) => void, key: string) {
+    const n = new Set(set);
+    n.has(key) ? n.delete(key) : n.add(key);
+    setter(n);
   }
 
   async function submit() {
     setErr(null);
     if (!description.trim()) return setErr('Describe the change.');
     if (picked.size === 0) return setErr('Select at least one instance.');
+    if (pickedFiles.size === 0) return setErr('Select at least one config file.');
     setBusy(true);
     try {
-      const change = await api.createChange(description.trim(), [...picked]);
+      const change = await api.createChange(description.trim(), [...picked], [...pickedFiles]);
       nav(`/changes/${change.id}`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'failed');
@@ -118,6 +134,7 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
         <textarea className="input" value={description} onChange={(e) => setDescription(e.target.value)}
           placeholder="e.g. Restrict Post order layering to 1 in Korea (add 144=1)" />
       </label>
+
       <div className="field">
         <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>Target instances</span>
         {groups.map((g) => (
@@ -125,10 +142,9 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
             <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{g}</div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
               {instances.filter((i) => i.environment === g).map((i) => (
-                <button key={i.code} type="button"
-                  className="btn btn-sm"
+                <button key={i.code} type="button" className="btn btn-sm"
                   style={picked.has(i.code) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-                  onClick={() => toggle(i.code)}>
+                  onClick={() => toggle(picked, setPicked, i.code)}>
                   {i.code}{i.uat ? ' · UAT' : ''}
                 </button>
               ))}
@@ -136,6 +152,24 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
           </div>
         ))}
       </div>
+
+      <div className="field">
+        <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>Config files</span>
+        {picked.size === 0 ? (
+          <div className="faint" style={{ fontSize: 12 }}>Select instances first.</div>
+        ) : availableFiles.length === 0 ? (
+          <div className="badge warning" style={{ fontSize: 12 }}>The selected instances share no managed files.</div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {availableFiles.map((f) => (
+              <button key={f} type="button" className="btn btn-sm mono"
+                style={pickedFiles.has(f) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+                onClick={() => toggle(pickedFiles, setPickedFiles, f)}>{f}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
       {err && <div style={{ marginBottom: 10 }}><span className="badge error">{err}</span></div>}
       <div className="hstack">
         <button className="btn btn-primary" onClick={submit} disabled={busy}>

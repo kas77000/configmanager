@@ -165,6 +165,11 @@ export class ConfigRepo {
     return git(this.dir, ['diff', `${base}...${branch}`, '--', this.file]);
   }
 
+  /** Unified diff of `branch` against `base` for a named file. */
+  async diffNamed(branch: string, base: string, file: string): Promise<string> {
+    return git(this.dir, ['diff', `${base}...${branch}`, '--', file]);
+  }
+
   /** 3-way merges `branch` into `into`, committed by `author`. Aborts cleanly on conflict. */
   async merge(branch: string, author: Author, into = this.mainBranch): Promise<MergeResult> {
     if (!isValidBranchName(branch)) throw new Error(`invalid branch name: ${branch}`);

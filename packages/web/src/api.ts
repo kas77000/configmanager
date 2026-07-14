@@ -8,7 +8,7 @@ export interface User { windowsId: string; displayName: string; email: string; r
 export type Environment = 'pilot' | 'production';
 export interface InstanceInfo { code: string; environment: Environment; uat: boolean; files: string[]; }
 
-export interface ChangeTarget { instance: string; file: string; branch: string; mergedCommit?: string; }
+export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export type ChangeStatus = 'draft' | 'merged' | 'cancelled';
 export interface Change {
   id: string; description: string; createdBy: string; createdAt: string;
@@ -75,14 +75,17 @@ export const api = {
   commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 
   changes: () => req<Change[]>('GET', '/changes'),
-  createChange: (description: string, instances: string[]) => req<Change>('POST', '/changes', { description, instances }),
+  createChange: (description: string, instances: string[], files: string[]) => req<Change>('POST', '/changes', { description, instances, files }),
   change: (id: string) => req<Change>('GET', `/changes/${id}`),
 
-  changeFile: (id: string, code: string) => req<{ instance: string; content: string }>('GET', `/changes/${id}/instances/${code}/file`),
-  putChangeFile: (id: string, code: string, content: string, message: string) =>
-    req<{ instance: string; commit: string }>('PUT', `/changes/${id}/instances/${code}/file`, { content, message }),
-  changeDiff: (id: string, code: string) => req<{ instance: string; diff: string }>('GET', `/changes/${id}/instances/${code}/diff`),
-  changeAnalysis: (id: string, code: string) => req<{ instance: string } & Gate>('GET', `/changes/${id}/instances/${code}/analysis`),
+  changeFile: (id: string, code: string, file: string) =>
+    req<{ instance: string; file: string; content: string }>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}`),
+  putChangeFile: (id: string, code: string, file: string, content: string, message: string) =>
+    req<{ instance: string; file: string; commit: string }>('PUT', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}`, { content, message }),
+  changeDiff: (id: string, code: string, file: string) =>
+    req<{ instance: string; file: string; diff: string }>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}/diff`),
+  changeAnalysis: (id: string, code: string, file: string) =>
+    req<{ instance: string; file: string } & Gate>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}/analysis`),
   mergeChange: (id: string, code: string, opts: { acknowledgeWarnings?: boolean; override?: boolean; overrideReason?: string }) =>
     req<{ merged: boolean; instance: string; commit: string }>('POST', `/changes/${id}/instances/${code}/merge`, opts),
 

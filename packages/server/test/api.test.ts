@@ -124,15 +124,39 @@ describe('API (per-instance)', () => {
     const id = await newChange(h.app, ['APIA', 'APIB']);
     const ed = as(h.app, 'ed');
     // APIA gets one edit, APIB a different one — same change, different files
-    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`)
       .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'JP' }).expect(200);
-    await ed('put', `/api/changes/${id}/instances/APIB/file`)
+    await ed('put', `/api/changes/${id}/instances/APIB/files/${FILE}`)
       .send({ content: '9012=1=1 :: compositeExchangeCode=KS\n', message: 'KS' }).expect(200);
 
-    const a = await ed('get', `/api/changes/${id}/instances/APIA/file`).expect(200);
-    const b = await ed('get', `/api/changes/${id}/instances/APIB/file`).expect(200);
+    const a = await ed('get', `/api/changes/${id}/instances/APIA/files/${FILE}`).expect(200);
+    const b = await ed('get', `/api/changes/${id}/instances/APIB/files/${FILE}`).expect(200);
     expect(a.body.content).toContain('JP');
     expect(b.body.content).toContain('KS');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('supports a change spanning multiple files on one instance', async () => {
+    const h = await makeHarness();
+    const admin = as(h.app, 'root');
+    const ed = as(h.app, 'ed');
+    await admin('post', '/api/instances/APIA/files').send({ file: 'risk.properties', content: 'r=0\n' }).expect(201);
+    const cid = (await ed('post', '/api/changes').send({ description: 'multi', instances: ['APIA'], files: [FILE, 'risk.properties'] }).expect(201)).body.id;
+
+    await ed('put', `/api/changes/${cid}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'fixmsg' }).expect(200);
+    await ed('put', `/api/changes/${cid}/instances/APIA/files/risk.properties`).send({ content: 'r=1\n', message: 'risk' }).expect(200);
+
+    // analysis on a non-fixmsg file yields no findings
+    const ra = await ed('get', `/api/changes/${cid}/instances/APIA/files/risk.properties/analysis`).expect(200);
+    expect(ra.body.errorCount).toBe(0);
+    expect(ra.body.warningCount).toBe(0);
+
+    // one merge applies both files to the instance
+    await ed('post', `/api/changes/${cid}/instances/APIA/merge`).send({}).expect(200);
+    const f1 = await ed('get', '/api/instances/APIA/file').expect(200);
+    expect(f1.body.content).toContain('JP');
+    const f2 = await ed('get', '/api/instances/APIA/file?file=risk.properties').expect(200);
+    expect(f2.body.content).toBe('r=1\n');
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -140,9 +164,9 @@ describe('API (per-instance)', () => {
     const h = await makeHarness();
     const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
-    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`)
       .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'JP' }).expect(200);
-    const analysis = await ed('get', `/api/changes/${id}/instances/APIA/analysis`).expect(200);
+    const analysis = await ed('get', `/api/changes/${id}/instances/APIA/files/${FILE}/analysis`).expect(200);
     expect(analysis.body.errorCount).toBe(0);
     expect(analysis.body.warningCount).toBe(0);
     const merge = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
@@ -157,7 +181,7 @@ describe('API (per-instance)', () => {
     const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
     const bad = '9012=1=1 :: orderSizeADV < 0.07, orderSizeADV >= 0.15\n';
-    await ed('put', `/api/changes/${id}/instances/APIA/file`).send({ content: bad, message: 'oops' }).expect(200);
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: bad, message: 'oops' }).expect(200);
 
     await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(403);
     await ed('post', `/api/changes/${id}/instances/APIA/merge`)
@@ -176,7 +200,7 @@ describe('API (per-instance)', () => {
     const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
     const warn = '9012=6=8 :: compositeExchangeCode=HK\n9012=6=12 :: compositeExchangeCode=HK\n';
-    await ed('put', `/api/changes/${id}/instances/APIA/file`).send({ content: warn, message: 'dup' }).expect(200);
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: warn, message: 'dup' }).expect(200);
     const needsAck = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({});
     expect(needsAck.status).toBe(409);
     const ok = await ed('post', `/api/changes/${id}/instances/APIA/merge`)
@@ -212,7 +236,7 @@ describe('API (per-instance)', () => {
     const h = await makeHarness();
     const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
-    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`)
       .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'edit' }).expect(200);
     await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     const history = await ed('get', '/api/history').expect(200);

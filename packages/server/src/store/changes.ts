@@ -1,12 +1,12 @@
 import { JsonStore } from './json-store';
-import { MANAGED_FILE, changeBranch } from '../config';
+import { changeBranch } from '../config';
 
 export interface ChangeTarget {
   instance: string;
-  /** Config file this target edits (multi-config ready; Phase 1 uses the one managed file). */
-  file: string;
-  /** Working branch for this instance's edit within the change. */
+  /** Working branch for this instance's edits within the change. */
   branch: string;
+  /** Config files this change edits on this instance. */
+  files: string[];
   /** Commit the branch was merged into its instance at, once applied. */
   mergedCommit?: string;
 }
@@ -27,6 +27,7 @@ export interface NewChange {
   description: string;
   createdBy: string;
   instances: string[];
+  files: string[];
 }
 
 /** Groups the per-instance edits that make up one logical change. */
@@ -48,8 +49,8 @@ export class ChangeStore {
         status: 'draft',
         targets: input.instances.map((instance) => ({
           instance,
-          file: MANAGED_FILE,
           branch: changeBranch(id, instance),
+          files: [...input.files],
         })),
       };
       changes.push(change);
