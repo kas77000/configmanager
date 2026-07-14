@@ -68,14 +68,14 @@ export default function History() {
         <div className="panel"><Skeleton rows={6} /></div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 16, alignItems: 'start' }}>
-          <section>
+          <section style={{ minWidth: 0 }}>
             <div className="group-title"><h2>Commit graph</h2><span className="count-chip">{commits.length}</span></div>
-            <div className="panel">
+            <div className="panel" style={{ overflowX: 'auto' }}>
               {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : <CommitGraph commits={commits} />}
             </div>
           </section>
 
-          <section>
+          <section style={{ minWidth: 0 }}>
             <div className="group-title"><h2>Activity</h2><span className="count-chip">{audit.length}</span></div>
             <div className="panel">
               {audit.length === 0 ? <div className="empty">No activity in this filter.</div> : (
@@ -163,9 +163,9 @@ function CommitGraph({ commits }: { commits: Commit[] }) {
               ))}
               <circle cx={cx} cy={mid} r={5} fill={color(r.lane)} stroke="var(--surface)" strokeWidth={1.5} />
             </svg>
-            <div className="hstack" style={{ flex: 1, minWidth: 0, gap: 8, padding: '0 8px 0 2px' }}>
-              {parseRefs(r.commit.refs).map((ref, i) => <RefPill key={i} ref_={ref} color={color(r.lane)} />)}
-              <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.subject}</span>
+            <div className="hstack" style={{ flex: 1, minWidth: 0, gap: 8, padding: '0 8px 0 2px', overflow: 'hidden' }}>
+              <RefList refs={parseRefs(r.commit.refs)} color={color(r.lane)} />
+              <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1, minWidth: 40 }}>{r.commit.subject}</span>
               <span className="mono faint" style={{ fontSize: 11, flex: 'none' }}>{r.commit.hash.slice(0, 7)}</span>
             </div>
             <span className="faint" style={{ width: 110, flex: 'none', fontSize: 12, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.authorName}</span>
@@ -190,6 +190,23 @@ function parseRefs(refs: string): Ref[] {
     const kind = name.startsWith('instance/') ? 'instance' as const : name.startsWith('change/') ? 'change' as const : 'other' as const;
     return { name, kind, head };
   }).filter((r) => r.name !== 'HEAD');
+}
+
+function RefList({ refs, color }: { refs: Ref[]; color: string }) {
+  const MAX = 3;
+  const shown = refs.slice(0, MAX);
+  const extra = refs.slice(MAX);
+  return (
+    <span className="hstack" style={{ gap: 4, flex: 'none' }}>
+      {shown.map((r, i) => <RefPill key={i} ref_={r} color={color} />)}
+      {extra.length > 0 && (
+        <span className="mono" title={extra.map((x) => x.name).join(', ')}
+          style={{ flex: 'none', fontSize: 10, padding: '1px 7px', borderRadius: 20, border: '1px solid var(--border-strong)', color: 'var(--muted)', whiteSpace: 'nowrap', cursor: 'default' }}>
+          +{extra.length}
+        </span>
+      )}
+    </span>
+  );
 }
 
 function RefPill({ ref_, color }: { ref_: Ref; color: string }) {
