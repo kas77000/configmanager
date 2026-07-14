@@ -277,7 +277,7 @@ export function createApp(deps: AppDeps): Express {
   // --- Commits & history ---------------------------------------------------
   api.get('/commits/:hash', wrap(async (req, res) => {
     try {
-      res.json({ hash: req.params.hash, patch: await repo.showCommit(req.params.hash) });
+      res.json(await repo.commitDetail(req.params.hash));
     } catch {
       res.status(404).json({ error: 'commit not found' });
     }

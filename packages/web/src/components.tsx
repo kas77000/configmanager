@@ -59,6 +59,21 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
+export function DiffLines({ patch, maxHeight = 360 }: { patch: string; maxHeight?: number }) {
+  const lines = patch.split('\n');
+  return (
+    <div className="diff" style={{ padding: '8px 0', maxHeight }}>
+      {lines.map((l, i) => {
+        const cls = l.startsWith('+') && !l.startsWith('+++') ? 'add'
+          : l.startsWith('-') && !l.startsWith('---') ? 'del'
+          : l.startsWith('@@') ? 'hunk'
+          : l.startsWith('diff ') ? 'hunk' : '';
+        return <span key={i} className={`ln ${cls}`}>{l || ' '}</span>;
+      })}
+    </div>
+  );
+}
+
 export function relTime(iso: string): string {
   const d = new Date(iso).getTime();
   const s = Math.round((Date.now() - d) / 1000);

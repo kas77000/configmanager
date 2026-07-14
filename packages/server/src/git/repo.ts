@@ -23,6 +23,43 @@ export interface MergeResult {
   conflicts?: string[];
 }
 
+export interface CommitFileChange {
+  file: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+export interface CommitDetail {
+  hash: string;
+  authorName: string;
+  authorEmail: string;
+  date: string;
+  parents: string[];
+  refs: string;
+  subject: string;
+  /** Instances whose branches contain this commit. */
+  instances: string[];
+  files: CommitFileChange[];
+}
+
+/** Splits a `git show --patch` body into per-file chunks. */
+function splitPatchByFile(patch: string): { file: string; patch: string }[] {
+  const chunks: { file: string; patch: string }[] = [];
+  let current: { file: string; lines: string[] } | null = null;
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      if (current) chunks.push({ file: current.file, patch: current.lines.join('\n') });
+      const m = /^diff --git a\/.+ b\/(.+)$/.exec(line);
+      current = { file: m ? m[1] : line, lines: [line] };
+    } else if (current) {
+      current.lines.push(line);
+    }
+  }
+  if (current) chunks.push({ file: current.file, patch: current.lines.join('\n') });
+  return chunks;
+}
+
 const BRANCH_RE = /^[A-Za-z0-9._/-]+$/;
 
 export function isValidBranchName(name: string): boolean {
@@ -184,6 +221,54 @@ export class ConfigRepo {
   async showCommit(hash: string): Promise<string> {
     if (!/^[0-9a-fA-F]{4,40}$/.test(hash)) throw new Error('invalid commit hash');
     return git(this.dir, ['show', hash, '--patch', '--format=fuller']);
+  }
+
+  /** Structured detail for one commit: metadata, which instances it touches, and per-file diffs. */
+  async commitDetail(hash: string): Promise<CommitDetail> {
+    if (!/^[0-9a-fA-F]{4,40}$/.test(hash)) throw new Error('invalid commit hash');
+    const sep = '\x1f';
+    const fmt = ['%H', '%an', '%ae', '%aI', '%P', '%D', '%s'].join(sep);
+    const [meta, numstat, patch, contains] = await Promise.all([
+      git(this.dir, ['show', '-s', `--format=${fmt}`, hash]),
+      git(this.dir, ['show', hash, '--numstat', '--format=']),
+      git(this.dir, ['show', hash, '--patch', '--format=']),
+      runGit(this.dir, ['branch', '--contains', hash, '--format=%(refname:short)']),
+    ]);
+
+    const [h, authorName, authorEmail, date, parents, refs, subject] = meta.trim().split(sep);
+
+    const stats = new Map<string, { additions: number; deletions: number }>();
+    for (const line of numstat.split('\n')) {
+      const parts = line.split('\t');
+      if (parts.length >= 3) {
+        stats.set(parts[2], { additions: Number(parts[0]) || 0, deletions: Number(parts[1]) || 0 });
+      }
+    }
+
+    const files = splitPatchByFile(patch).map((f) => ({
+      file: f.file,
+      additions: stats.get(f.file)?.additions ?? 0,
+      deletions: stats.get(f.file)?.deletions ?? 0,
+      patch: f.patch,
+    }));
+
+    const instances = new Set<string>();
+    for (const ref of contains.stdout.split('\n').map((s) => s.trim()).filter(Boolean)) {
+      if (ref.startsWith('instance/')) instances.add(ref.slice('instance/'.length));
+      else if (ref.startsWith('change/')) { const seg = ref.split('/'); instances.add(seg[seg.length - 1]); }
+    }
+
+    return {
+      hash: h,
+      authorName,
+      authorEmail,
+      date,
+      parents: parents ? parents.split(' ').filter(Boolean) : [],
+      refs: refs ?? '',
+      subject: subject ?? '',
+      instances: [...instances],
+      files,
+    };
   }
 
   /** Commit graph across all branches, newest first. */

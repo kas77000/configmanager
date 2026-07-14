@@ -27,6 +27,12 @@ export interface AuditEvent {
 }
 export interface DriftResult { instance: string; inSync: boolean; recordedSha: string; liveSha: string; }
 
+export interface CommitFileChange { file: string; additions: number; deletions: number; patch: string; }
+export interface CommitDetail {
+  hash: string; authorName: string; authorEmail: string; date: string;
+  parents: string[]; refs: string; subject: string; instances: string[]; files: CommitFileChange[];
+}
+
 export class ApiError extends Error {
   constructor(public status: number, public body: any) {
     super(typeof body?.error === 'string' ? body.error : `HTTP ${status}`);
@@ -66,7 +72,7 @@ export const api = {
   addInstanceFile: (code: string, file: string, content?: string) => req<InstanceInfo>('POST', `/instances/${code}/files`, { file, content }),
   removeInstanceFile: (code: string, file: string) => req<InstanceInfo>('DELETE', `/instances/${code}/files/${encodeURIComponent(file)}`),
 
-  commit: (hash: string) => req<{ hash: string; patch: string }>('GET', `/commits/${hash}`),
+  commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 
   changes: () => req<Change[]>('GET', '/changes'),
   createChange: (description: string, instances: string[]) => req<Change>('POST', '/changes', { description, instances }),

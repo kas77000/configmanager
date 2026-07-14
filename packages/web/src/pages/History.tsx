@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, type AuditEvent, type Commit, type InstanceInfo } from '../api';
 import { Skeleton, relTime } from '../components';
 import { IconChevron } from '../icons';
@@ -110,50 +111,21 @@ export default function History() {
 }
 
 function CommitRow({ c }: { c: Commit }) {
-  const [open, setOpen] = useState(false);
-  const [patch, setPatch] = useState<string | null>(null);
-
-  function toggle() {
-    const next = !open;
-    setOpen(next);
-    if (next && patch === null) api.commit(c.hash).then((r) => setPatch(r.patch)).catch(() => setPatch('failed to load'));
-  }
-
+  const nav = useNavigate();
   return (
-    <div style={{ borderBottom: '1px solid var(--border)' }}>
-      <div className="rowlink" style={{ padding: '10px 16px', cursor: 'pointer' }} onClick={toggle}>
-        <div className="hstack" style={{ justifyContent: 'space-between' }}>
-          <span className="hstack">
-            <IconChevron style={{ width: 14, height: 14, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ease)', color: 'var(--faint)' }} />
-            <span className="mono" style={{ color: 'var(--accent)' }}>{c.hash.slice(0, 8)}</span>
-          </span>
-          {c.refs && <RefBadges refs={c.refs} />}
-        </div>
-        <div style={{ marginTop: 2, marginLeft: 22 }}>{c.subject}</div>
-        <div className="faint" style={{ fontSize: 12, marginTop: 2, marginLeft: 22 }}>
-          {c.authorName} · {relTime(c.date)}{c.parents.length > 1 ? ' · merge' : ''}
-        </div>
+    <div className="rowlink" style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
+      onClick={() => nav(`/commits/${c.hash}`)}>
+      <div className="hstack" style={{ justifyContent: 'space-between' }}>
+        <span className="hstack">
+          <IconChevron style={{ width: 14, height: 14, color: 'var(--faint)' }} />
+          <span className="mono" style={{ color: 'var(--accent)' }}>{c.hash.slice(0, 8)}</span>
+        </span>
+        {c.refs && <RefBadges refs={c.refs} />}
       </div>
-      {open && (
-        <div style={{ padding: '0 16px 12px' }}>
-          {patch === null ? <div className="faint" style={{ fontSize: 12, padding: 8 }}>Loading…</div> : <PatchView patch={patch} />}
-        </div>
-      )}
-    </div>
-  );
-}
-
-export function PatchView({ patch }: { patch: string }) {
-  const lines = patch.split('\n');
-  return (
-    <div className="diff" style={{ padding: '8px 0', maxHeight: 360 }}>
-      {lines.map((l, i) => {
-        const cls = l.startsWith('+') && !l.startsWith('+++') ? 'add'
-          : l.startsWith('-') && !l.startsWith('---') ? 'del'
-          : l.startsWith('@@') ? 'hunk'
-          : l.startsWith('diff ') || l.startsWith('commit ') ? 'hunk' : '';
-        return <span key={i} className={`ln ${cls}`}>{l || ' '}</span>;
-      })}
+      <div style={{ marginTop: 2, marginLeft: 22 }}>{c.subject}</div>
+      <div className="faint" style={{ fontSize: 12, marginTop: 2, marginLeft: 22 }}>
+        {c.authorName} · {relTime(c.date)}{c.parents.length > 1 ? ' · merge' : ''}
+      </div>
     </div>
   );
 }

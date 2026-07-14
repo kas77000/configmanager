@@ -8,6 +8,7 @@ import Changes from './pages/Changes';
 import ChangeDetail from './pages/ChangeDetail';
 import History from './pages/History';
 import Admin from './pages/Admin';
+import CommitPage from './pages/CommitPage';
 
 export default function App() {
   const [me, setMe] = useState<User | null>(null);
@@ -55,6 +56,7 @@ export default function App() {
           <Route path="/changes" element={<Changes me={me} />} />
           <Route path="/changes/:id" element={<ChangeDetail me={me} />} />
           <Route path="/history" element={<History />} />
+          <Route path="/commits/:hash" element={<CommitPage />} />
           <Route path="/admin" element={<Admin me={me} />} />
         </Routes>
       </main>
