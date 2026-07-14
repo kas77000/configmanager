@@ -37,7 +37,7 @@ export interface Gate { findings: Finding[]; errorCount: number; warningCount: n
 
 export interface Commit {
   hash: string; authorName: string; authorEmail: string; date: string;
-  parents: string[]; refs: string; subject: string;
+  parents: string[]; refs: string; subject: string; instances: string[];
 }
 export interface AuditEvent {
   id: number; timestamp: string; windowsId: string; ip?: string;

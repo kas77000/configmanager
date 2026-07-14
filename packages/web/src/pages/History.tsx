@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type AuditEvent, type Commit, type InstanceInfo } from '../api';
 import { Skeleton, relTime } from '../components';
-import { IconChevron } from '../icons';
 
 type Range = 'all' | '24h' | '7d' | '30d';
 const RANGE_MS: Record<Range, number> = { all: Infinity, '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5 };
+const LANE_COLORS = ['var(--accent)', 'var(--info)', 'var(--success)', 'var(--warning)', 'var(--uat)', 'var(--error)'];
+const ROW_H = 36;
+const LW = 16;
 
 export default function History() {
   const [data, setData] = useState<{ commits: Commit[]; audit: AuditEvent[] } | null>(null);
@@ -22,14 +24,12 @@ export default function History() {
 
   const audit = useMemo(() => {
     if (!data) return [];
-    return [...data.audit].reverse().filter((e) =>
-      new Date(e.timestamp).getTime() >= cutoff && matchInstances(auditInstances(e), selected));
+    return [...data.audit].reverse().filter((e) => new Date(e.timestamp).getTime() >= cutoff && matchInstances(auditInstances(e), selected));
   }, [data, cutoff, selected]);
 
   const commits = useMemo(() => {
     if (!data) return [];
-    return data.commits.filter((c) =>
-      new Date(c.date).getTime() >= cutoff && matchInstances(refInstances(c.refs), selected));
+    return data.commits.filter((c) => new Date(c.date).getTime() >= cutoff && matchInstances(c.instances, selected));
   }, [data, cutoff, selected]);
 
   function toggle(code: string) {
@@ -42,7 +42,7 @@ export default function History() {
         <div>
           <div className="eyebrow">Traceability</div>
           <h1>History</h1>
-          <p>Every branch, edit, review, and merge, with who did it and when. Filter by instance and time, and open a commit to see exactly what changed.</p>
+          <p>The commit graph across all instances, with who did what and when. Filter by instance and time; open a commit to see exactly what changed.</p>
         </div>
       </div>
 
@@ -51,19 +51,14 @@ export default function History() {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
             <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Instances</span>
             {instances.map((i) => (
-              <button key={i.code} className="btn btn-sm"
-                style={selected.has(i.code) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-                onClick={() => toggle(i.code)}>{i.code}</button>
+              <button key={i.code} className="btn btn-sm" style={selected.has(i.code) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined} onClick={() => toggle(i.code)}>{i.code}</button>
             ))}
             {selected.size > 0 && <button className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set())}>clear</button>}
           </div>
           <div className="hstack">
             <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Range</span>
             <select className="input" style={{ height: 28, width: 120, padding: '0 8px' }} value={range} onChange={(e) => setRange(e.target.value as Range)}>
-              <option value="all">All time</option>
-              <option value="24h">Last 24h</option>
-              <option value="7d">Last 7 days</option>
-              <option value="30d">Last 30 days</option>
+              <option value="all">All time</option><option value="24h">Last 24h</option><option value="7d">Last 7 days</option><option value="30d">Last 30 days</option>
             </select>
           </div>
         </div>
@@ -72,7 +67,14 @@ export default function History() {
       {!data ? (
         <div className="panel"><Skeleton rows={6} /></div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 16, alignItems: 'start' }}>
+          <section>
+            <div className="group-title"><h2>Commit graph</h2><span className="count-chip">{commits.length}</span></div>
+            <div className="panel">
+              {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : <CommitGraph commits={commits} />}
+            </div>
+          </section>
+
           <section>
             <div className="group-title"><h2>Activity</h2><span className="count-chip">{audit.length}</span></div>
             <div className="panel">
@@ -93,39 +95,83 @@ export default function History() {
               )}
             </div>
           </section>
-
-          <section>
-            <div className="group-title"><h2>Commits</h2><span className="count-chip">{commits.length}</span></div>
-            <div className="panel">
-              {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : (
-                <div className="stack">
-                  {commits.map((c) => <CommitRow key={c.hash} c={c} />)}
-                </div>
-              )}
-            </div>
-          </section>
         </div>
       )}
     </div>
   );
 }
 
-function CommitRow({ c }: { c: Commit }) {
+interface GRow { commit: Commit; lane: number; inLanes: (string | null)[]; out: (string | null)[]; mine: number[]; parentLanes: Record<string, number>; }
+
+function layout(commits: Commit[]): { rows: GRow[]; width: number } {
+  const visible = new Set(commits.map((c) => c.hash));
+  const firstFree = (arr: (string | null)[]) => { const i = arr.indexOf(null); return i !== -1 ? i : arr.length; };
+  let lanes: (string | null)[] = [];
+  let width = 1;
+  const rows: GRow[] = [];
+  for (const c of commits) {
+    const inLanes = lanes.slice();
+    const mine: number[] = [];
+    inLanes.forEach((h, idx) => { if (h === c.hash) mine.push(idx); });
+    const lane = mine.length > 0 ? mine[0] : firstFree(inLanes);
+    const out = inLanes.slice();
+    mine.forEach((idx) => (out[idx] = null));
+    out[lane] = null;
+    const parentLanes: Record<string, number> = {};
+    const vps = c.parents.filter((p) => visible.has(p));
+    vps.forEach((p, k) => {
+      if (k === 0) { out[lane] = p; parentLanes[p] = lane; }
+      else { let pl = out.indexOf(p); if (pl === -1) pl = firstFree(out); out[pl] = p; parentLanes[p] = pl; }
+    });
+    while (out.length && out[out.length - 1] === null) out.pop();
+    lanes = out;
+    width = Math.max(width, inLanes.length, out.length, lane + 1);
+    rows.push({ commit: c, lane, inLanes, out, mine, parentLanes });
+  }
+  return { rows, width };
+}
+
+function CommitGraph({ commits }: { commits: Commit[] }) {
   const nav = useNavigate();
+  const { rows, width } = useMemo(() => layout(commits), [commits]);
+  const gw = width * LW;
+  const laneX = (l: number) => l * LW + LW / 2;
+  const color = (l: number) => LANE_COLORS[l % LANE_COLORS.length];
+
   return (
-    <div className="rowlink" style={{ padding: '10px 16px', cursor: 'pointer', borderBottom: '1px solid var(--border)' }}
-      onClick={() => nav(`/commits/${c.hash}`)}>
-      <div className="hstack" style={{ justifyContent: 'space-between' }}>
-        <span className="hstack">
-          <IconChevron style={{ width: 14, height: 14, color: 'var(--faint)' }} />
-          <span className="mono" style={{ color: 'var(--accent)' }}>{c.hash.slice(0, 8)}</span>
-        </span>
-        {c.refs && <RefBadges refs={c.refs} />}
-      </div>
-      <div style={{ marginTop: 2, marginLeft: 22 }}>{c.subject}</div>
-      <div className="faint" style={{ fontSize: 12, marginTop: 2, marginLeft: 22 }}>
-        {c.authorName} · {relTime(c.date)}{c.parents.length > 1 ? ' · merge' : ''}
-      </div>
+    <div className="stack">
+      {rows.map((r) => {
+        const cx = laneX(r.lane);
+        return (
+          <div key={r.commit.hash} className="rowlink" style={{ display: 'flex', alignItems: 'stretch', borderBottom: '1px solid var(--border)', cursor: 'pointer' }} onClick={() => nav(`/commits/${r.commit.hash}`)}>
+            <svg width={gw} height={ROW_H} style={{ flex: 'none' }}>
+              {/* pass-through lanes */}
+              {r.inLanes.map((h, j) => (h && j !== r.lane && !r.mine.includes(j) && r.out[j] ? (
+                <line key={`p${j}`} x1={laneX(j)} y1={0} x2={laneX(j)} y2={ROW_H} stroke={color(j)} strokeWidth={1.5} />
+              ) : null))}
+              {/* merge-in from other lanes that also expected this commit */}
+              {r.mine.filter((j) => j !== r.lane).map((j) => (
+                <path key={`m${j}`} d={`M ${laneX(j)} 0 C ${laneX(j)} ${ROW_H / 2}, ${cx} ${ROW_H / 2}, ${cx} ${ROW_H / 2}`} stroke={color(j)} strokeWidth={1.5} fill="none" />
+              ))}
+              {/* edges to parents */}
+              {Object.values(r.parentLanes).map((pl) => (
+                <path key={`e${pl}`} d={`M ${cx} ${ROW_H / 2} C ${cx} ${ROW_H * 0.75}, ${laneX(pl)} ${ROW_H * 0.75}, ${laneX(pl)} ${ROW_H}`} stroke={color(pl)} strokeWidth={1.5} fill="none" />
+              ))}
+              <circle cx={cx} cy={ROW_H / 2} r={4.5} fill="var(--surface)" stroke={color(r.lane)} strokeWidth={2} />
+            </svg>
+            <div style={{ padding: '6px 12px 6px 4px', minWidth: 0, flex: 1 }}>
+              <div className="hstack" style={{ justifyContent: 'space-between', gap: 8 }}>
+                <span className="hstack" style={{ minWidth: 0 }}>
+                  <span className="mono" style={{ color: 'var(--accent)', fontSize: 12 }}>{r.commit.hash.slice(0, 7)}</span>
+                  <span style={{ fontSize: 13, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{r.commit.subject}</span>
+                </span>
+                {r.commit.refs && <RefBadges refs={r.commit.refs} />}
+              </div>
+              <div className="faint" style={{ fontSize: 11 }}>{r.commit.authorName} · {relTime(r.commit.date)}{r.commit.parents.length > 1 ? ' · merge' : ''}</div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -139,29 +185,20 @@ function auditInstances(e: AuditEvent): string[] {
   return out;
 }
 
-function refInstances(refs: string): string[] {
-  return refs.split(',').map((r) => r.trim().replace(/^HEAD -> /, '').split('/').pop() ?? '').filter(Boolean);
-}
-
 function matchInstances(codes: string[], selected: Set<string>): boolean {
   if (selected.size === 0) return true;
   return codes.some((c) => selected.has(c));
 }
 
 function actionText(action: string): string {
-  switch (action) {
-    case 'create-change': return 'opened change';
-    case 'create-branch': return 'created branch';
-    case 'edit': return 'edited';
-    case 'merge': return 'merged into';
-    case 'sync-import': return 'synced live version into';
-    case 'create-instance': return 'created instance';
-    case 'update-instance': return 'updated instance';
-    case 'delete-instance': return 'deleted instance';
-    case 'add-file': return 'added managed file to';
-    case 'remove-file': return 'stopped managing a file on';
-    default: return action;
-  }
+  const map: Record<string, string> = {
+    'create-change': 'opened change', 'create-branch': 'created branch', 'edit': 'edited',
+    'merge': 'merged into', 'sync-import': 'synced live version into', 'submit-change': 'submitted',
+    'approve-change': 'approved', 'reject-change': 'rejected', 'create-instance': 'created instance',
+    'update-instance': 'updated instance', 'delete-instance': 'deleted instance', 'add-file': 'added file to',
+    'remove-file': 'unmanaged a file on', 'add-user': 'added user', 'update-user': 'updated user', 'remove-user': 'removed user',
+  };
+  return map[action] ?? action;
 }
 
 function renderDetails(e: AuditEvent) {
@@ -169,17 +206,15 @@ function renderDetails(e: AuditEvent) {
   const bits: string[] = [];
   if (typeof d.changeId === 'string') bits.push(d.changeId);
   if (typeof d.file === 'string') bits.push(d.file);
+  if (typeof d.user === 'string') bits.push(d.user as string);
   if (d.override) bits.push('override');
   if (typeof d.overrideReason === 'string') bits.push(`"${d.overrideReason}"`);
+  if (typeof d.reason === 'string' && d.reason) bits.push(`"${d.reason}"`);
   if (!bits.length) return null;
   return <span className="faint" style={{ fontSize: 12 }}> · {bits.join(' · ')}</span>;
 }
 
 function RefBadges({ refs }: { refs: string }) {
   const parts = refs.split(',').map((r) => r.trim().replace(/^HEAD -> /, '')).filter(Boolean);
-  return (
-    <span className="hstack" style={{ gap: 4 }}>
-      {parts.slice(0, 3).map((r) => <span key={r} className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>{r}</span>)}
-    </span>
-  );
+  return <span className="hstack" style={{ gap: 4 }}>{parts.slice(0, 2).map((r) => <span key={r} className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>{r}</span>)}</span>;
 }

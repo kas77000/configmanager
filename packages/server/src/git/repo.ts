@@ -15,6 +15,8 @@ export interface CommitInfo {
   parents: string[];
   refs: string;
   subject: string;
+  /** Instance codes whose branch history contains this commit. */
+  instances: string[];
 }
 
 export interface MergeResult {
@@ -282,6 +284,20 @@ export class ConfigRepo {
     const fmt = ['%H', '%an', '%ae', '%aI', '%P', '%D', '%s'].join(sep);
     const out = await git(this.dir, ['log', '--all', `--pretty=format:${fmt}`]);
     if (out.trim() === '') return [];
+
+    // Map each commit to the instance branches whose history contains it.
+    const membership = new Map<string, string[]>();
+    for (const branch of await this.listBranches()) {
+      if (!branch.startsWith('instance/')) continue;
+      const code = branch.slice('instance/'.length);
+      const hashes = (await git(this.dir, ['rev-list', branch])).split('\n').filter(Boolean);
+      for (const h of hashes) {
+        const arr = membership.get(h) ?? [];
+        arr.push(code);
+        membership.set(h, arr);
+      }
+    }
+
     return out
       .split('\n')
       .filter(Boolean)
@@ -295,6 +311,7 @@ export class ConfigRepo {
           parents: parents ? parents.split(' ').filter(Boolean) : [],
           refs: refs ?? '',
           subject: subject ?? '',
+          instances: membership.get(hash) ?? [],
         };
       });
   }
