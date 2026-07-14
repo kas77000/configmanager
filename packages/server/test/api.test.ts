@@ -10,8 +10,9 @@ import { JsonStore } from '../src/store/json-store';
 import { UserDirectory, type User } from '../src/store/users';
 import { AuditLog, type AuditEvent } from '../src/store/audit';
 import { ChangeStore, type Change } from '../src/store/changes';
+import { InstanceStore, type ManagedInstance } from '../src/store/instances';
 import { StaticInstanceReader } from '../src/instance-reader';
-import { seedRepo } from '../src/bootstrap';
+import { seedInstances, seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
 const CLEAN = '9012=1=1 :: compositeExchangeCode=HK\n';
@@ -30,15 +31,17 @@ async function makeHarness(): Promise<Harness> {
   const users = new UserDirectory(new JsonStore<User[]>(join(dir, 'users.json'), []));
   const audit = new AuditLog(new JsonStore<AuditEvent[]>(join(dir, 'audit.json'), []));
   const changes = new ChangeStore(new JsonStore<Change[]>(join(dir, 'changes.json'), []));
+  const instances = new InstanceStore(new JsonStore<ManagedInstance[]>(join(dir, 'instances.json'), []));
+  await seedInstances(instances);
   const reader = new StaticInstanceReader();
   reader.set('APIA', FILE, CLEAN); // live matches recorded by default
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', role: 'admin' });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', role: 'editor' });
-  const app = createApp({ repo, users, audit, changes, reader, identity: { header: HEADER } });
+  const app = createApp({ repo, users, audit, changes, instances, reader, identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
-const as = (app: Express, id: string) => (method: 'get' | 'post' | 'put', url: string) =>
+const as = (app: Express, id: string) => (method: 'get' | 'post' | 'put' | 'patch' | 'delete', url: string) =>
   request(app)[method](url).set(HEADER, id);
 
 async function newChange(app: Express, instances: string[]): Promise<string> {
@@ -60,14 +63,51 @@ describe('API (per-instance)', () => {
     const list = await as(h.app, 'ed')('get', '/api/instances').expect(200);
     const byCode = Object.fromEntries(
       list.body.map((i: { code: string }) => [i.code, i]),
-    ) as Record<string, { environment: string; uat: boolean }>;
+    ) as Record<string, { environment: string; uat: boolean; files: string[] }>;
     expect(byCode.APIH).toMatchObject({ environment: 'pilot', uat: true });
     expect(byCode.APIC).toMatchObject({ environment: 'pilot', uat: false });
     expect(byCode.APIF.environment).toBe('pilot');
     expect(byCode.APIG.environment).toBe('pilot');
     expect(byCode.APIA).toMatchObject({ environment: 'production', uat: false });
+    expect(byCode.APIA.files).toContain(FILE);
     const file = await as(h.app, 'ed')('get', '/api/instances/APIA/file').expect(200);
     expect(file.body.content).toBe(CLEAN);
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('lets an admin create, edit, add a file to, and delete an instance', async () => {
+    const h = await makeHarness();
+    const admin = as(h.app, 'root');
+    const ed = as(h.app, 'ed');
+
+    // non-admin cannot create
+    await ed('post', '/api/instances').send({ code: 'APIZ', environment: 'production' }).expect(403);
+
+    // create (branches from an existing instance, inheriting its files)
+    const created = await admin('post', '/api/instances').send({ code: 'APIZ', environment: 'pilot', uat: false }).expect(201);
+    expect(created.body).toMatchObject({ code: 'APIZ', environment: 'pilot', files: [FILE] });
+    // its git branch exists and is usable in a change
+    const cid = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIZ'] }).expect(201)).body.id;
+    expect(cid).toBeTruthy();
+
+    // edit environment + make it the UAT box (moves UAT off APIH)
+    await admin('patch', '/api/instances/APIZ').send({ environment: 'production', uat: true }).expect(200);
+    const list = await admin('get', '/api/instances').expect(200);
+    const byCode = Object.fromEntries(list.body.map((i: any) => [i.code, i]));
+    expect(byCode.APIZ).toMatchObject({ environment: 'production', uat: true });
+    expect(byCode.APIH.uat).toBe(false);
+
+    // add a second managed file, committed onto the instance branch
+    const withFile = await admin('post', '/api/instances/APIZ/files').send({ file: 'risk.properties', content: 'x=1\n' }).expect(201);
+    expect(withFile.body.files).toContain('risk.properties');
+    const f = await admin('get', '/api/instances/APIZ/file?file=risk.properties').expect(200);
+    expect(f.body.content).toBe('x=1\n');
+
+    // remove the managed file (metadata) and delete the instance
+    await admin('delete', '/api/instances/APIZ/files/risk.properties').expect(200);
+    await admin('delete', '/api/instances/APIZ').expect(200);
+    const after = await admin('get', '/api/instances').expect(200);
+    expect(after.body.some((i: any) => i.code === 'APIZ')).toBe(false);
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -142,21 +182,6 @@ describe('API (per-instance)', () => {
     const ok = await ed('post', `/api/changes/${id}/instances/APIA/merge`)
       .send({ acknowledgeWarnings: true }).expect(200);
     expect(ok.body.merged).toBe(true);
-    await rm(h.dir, { recursive: true, force: true });
-  });
-
-  it('verifies drift read-only by fetching the live file', async () => {
-    const h = await makeHarness();
-    const ed = as(h.app, 'ed');
-    const same = await ed('post', '/api/instances/APIA/verify').send({}).expect(200);
-    expect(same.body.inSync).toBe(true);
-
-    h.reader.set('APIA', FILE, '9012=1=1 :: compositeExchangeCode=JP\n');
-    const drifted = await ed('post', '/api/instances/APIA/verify').send({}).expect(200);
-    expect(drifted.body.inSync).toBe(false);
-    // verify does not ingest — recorded version is unchanged
-    const file = await ed('get', '/api/instances/APIA/file').expect(200);
-    expect(file.body.content).toBe(CLEAN);
     await rm(h.dir, { recursive: true, force: true });
   });
 

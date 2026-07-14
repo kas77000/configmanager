@@ -1,13 +1,39 @@
-import { useEffect, useState } from 'react';
-import { api, type AuditEvent, type Commit } from '../api';
+import { useEffect, useMemo, useState } from 'react';
+import { api, type AuditEvent, type Commit, type InstanceInfo } from '../api';
 import { Skeleton, relTime } from '../components';
+import { IconChevron } from '../icons';
+
+type Range = 'all' | '24h' | '7d' | '30d';
+const RANGE_MS: Record<Range, number> = { all: Infinity, '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5 };
 
 export default function History() {
   const [data, setData] = useState<{ commits: Commit[]; audit: AuditEvent[] } | null>(null);
+  const [instances, setInstances] = useState<InstanceInfo[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [range, setRange] = useState<Range>('all');
 
   useEffect(() => {
     api.history().then(setData).catch(() => setData({ commits: [], audit: [] }));
+    api.instances().then(setInstances).catch(() => setInstances([]));
   }, []);
+
+  const cutoff = range === 'all' ? 0 : Date.now() - RANGE_MS[range];
+
+  const audit = useMemo(() => {
+    if (!data) return [];
+    return [...data.audit].reverse().filter((e) =>
+      new Date(e.timestamp).getTime() >= cutoff && matchInstances(auditInstances(e), selected));
+  }, [data, cutoff, selected]);
+
+  const commits = useMemo(() => {
+    if (!data) return [];
+    return data.commits.filter((c) =>
+      new Date(c.date).getTime() >= cutoff && matchInstances(refInstances(c.refs), selected));
+  }, [data, cutoff, selected]);
+
+  function toggle(code: string) {
+    setSelected((s) => { const n = new Set(s); n.has(code) ? n.delete(code) : n.add(code); return n; });
+  }
 
   return (
     <div className="page">
@@ -15,7 +41,30 @@ export default function History() {
         <div>
           <div className="eyebrow">Traceability</div>
           <h1>History</h1>
-          <p>Every branch, edit, review, and merge, with who did it and when.</p>
+          <p>Every branch, edit, review, and merge, with who did it and when. Filter by instance and time, and open a commit to see exactly what changed.</p>
+        </div>
+      </div>
+
+      <div className="panel" style={{ padding: 12, marginBottom: 16 }}>
+        <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+            <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Instances</span>
+            {instances.map((i) => (
+              <button key={i.code} className="btn btn-sm"
+                style={selected.has(i.code) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
+                onClick={() => toggle(i.code)}>{i.code}</button>
+            ))}
+            {selected.size > 0 && <button className="btn btn-sm btn-ghost" onClick={() => setSelected(new Set())}>clear</button>}
+          </div>
+          <div className="hstack">
+            <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Range</span>
+            <select className="input" style={{ height: 28, width: 120, padding: '0 8px' }} value={range} onChange={(e) => setRange(e.target.value as Range)}>
+              <option value="all">All time</option>
+              <option value="24h">Last 24h</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -24,11 +73,11 @@ export default function History() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, alignItems: 'start' }}>
           <section>
-            <div className="group-title"><h2>Activity</h2><span className="count-chip">{data.audit.length}</span></div>
+            <div className="group-title"><h2>Activity</h2><span className="count-chip">{audit.length}</span></div>
             <div className="panel">
-              {data.audit.length === 0 ? <div className="empty">No activity yet.</div> : (
+              {audit.length === 0 ? <div className="empty">No activity in this filter.</div> : (
                 <div className="stack">
-                  {[...data.audit].reverse().map((e) => (
+                  {audit.map((e) => (
                     <div key={e.id} className="row-between" style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
                       <div>
                         <span className="mono" style={{ fontWeight: 600 }}>{e.windowsId}</span>
@@ -45,22 +94,11 @@ export default function History() {
           </section>
 
           <section>
-            <div className="group-title"><h2>Commits</h2><span className="count-chip">{data.commits.length}</span></div>
+            <div className="group-title"><h2>Commits</h2><span className="count-chip">{commits.length}</span></div>
             <div className="panel">
-              {data.commits.length === 0 ? <div className="empty">No commits yet.</div> : (
+              {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : (
                 <div className="stack">
-                  {data.commits.map((c) => (
-                    <div key={c.hash} style={{ padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
-                      <div className="hstack" style={{ justifyContent: 'space-between' }}>
-                        <span className="mono" style={{ color: 'var(--accent)' }}>{c.hash.slice(0, 8)}</span>
-                        {c.refs && <RefBadges refs={c.refs} />}
-                      </div>
-                      <div style={{ marginTop: 2 }}>{c.subject}</div>
-                      <div className="faint" style={{ fontSize: 12, marginTop: 2 }}>
-                        {c.authorName} · {relTime(c.date)}{c.parents.length > 1 ? ' · merge' : ''}
-                      </div>
-                    </div>
-                  ))}
+                  {commits.map((c) => <CommitRow key={c.hash} c={c} />)}
                 </div>
               )}
             </div>
@@ -71,6 +109,73 @@ export default function History() {
   );
 }
 
+function CommitRow({ c }: { c: Commit }) {
+  const [open, setOpen] = useState(false);
+  const [patch, setPatch] = useState<string | null>(null);
+
+  function toggle() {
+    const next = !open;
+    setOpen(next);
+    if (next && patch === null) api.commit(c.hash).then((r) => setPatch(r.patch)).catch(() => setPatch('failed to load'));
+  }
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)' }}>
+      <div className="rowlink" style={{ padding: '10px 16px', cursor: 'pointer' }} onClick={toggle}>
+        <div className="hstack" style={{ justifyContent: 'space-between' }}>
+          <span className="hstack">
+            <IconChevron style={{ width: 14, height: 14, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ease)', color: 'var(--faint)' }} />
+            <span className="mono" style={{ color: 'var(--accent)' }}>{c.hash.slice(0, 8)}</span>
+          </span>
+          {c.refs && <RefBadges refs={c.refs} />}
+        </div>
+        <div style={{ marginTop: 2, marginLeft: 22 }}>{c.subject}</div>
+        <div className="faint" style={{ fontSize: 12, marginTop: 2, marginLeft: 22 }}>
+          {c.authorName} · {relTime(c.date)}{c.parents.length > 1 ? ' · merge' : ''}
+        </div>
+      </div>
+      {open && (
+        <div style={{ padding: '0 16px 12px' }}>
+          {patch === null ? <div className="faint" style={{ fontSize: 12, padding: 8 }}>Loading…</div> : <PatchView patch={patch} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function PatchView({ patch }: { patch: string }) {
+  const lines = patch.split('\n');
+  return (
+    <div className="diff" style={{ padding: '8px 0', maxHeight: 360 }}>
+      {lines.map((l, i) => {
+        const cls = l.startsWith('+') && !l.startsWith('+++') ? 'add'
+          : l.startsWith('-') && !l.startsWith('---') ? 'del'
+          : l.startsWith('@@') ? 'hunk'
+          : l.startsWith('diff ') || l.startsWith('commit ') ? 'hunk' : '';
+        return <span key={i} className={`ln ${cls}`}>{l || ' '}</span>;
+      })}
+    </div>
+  );
+}
+
+function auditInstances(e: AuditEvent): string[] {
+  const d = e.details as Record<string, unknown> | undefined;
+  const out: string[] = [];
+  if (typeof d?.instance === 'string') out.push(d.instance);
+  if (Array.isArray(d?.instances)) out.push(...(d!.instances as string[]));
+  if (e.branch) { const p = e.branch.split('/'); out.push(p[p.length - 1]); }
+  return out;
+}
+
+function refInstances(refs: string): string[] {
+  return refs.split(',').map((r) => r.trim().replace(/^HEAD -> /, '').split('/').pop() ?? '').filter(Boolean);
+}
+
+function matchInstances(codes: string[], selected: Set<string>): boolean {
+  if (selected.size === 0) return true;
+  return codes.some((c) => selected.has(c));
+}
+
 function actionText(action: string): string {
   switch (action) {
     case 'create-change': return 'opened change';
@@ -78,7 +183,11 @@ function actionText(action: string): string {
     case 'edit': return 'edited';
     case 'merge': return 'merged into';
     case 'sync-import': return 'synced live version into';
-    case 'verify-instance': return 'verified';
+    case 'create-instance': return 'created instance';
+    case 'update-instance': return 'updated instance';
+    case 'delete-instance': return 'deleted instance';
+    case 'add-file': return 'added managed file to';
+    case 'remove-file': return 'stopped managing a file on';
     default: return action;
   }
 }
@@ -87,9 +196,9 @@ function renderDetails(e: AuditEvent) {
   const d = e.details ?? {};
   const bits: string[] = [];
   if (typeof d.changeId === 'string') bits.push(d.changeId);
+  if (typeof d.file === 'string') bits.push(d.file);
   if (d.override) bits.push('override');
   if (typeof d.overrideReason === 'string') bits.push(`"${d.overrideReason}"`);
-  if (typeof d.inSync === 'boolean') bits.push(d.inSync ? 'in sync' : 'drift');
   if (!bits.length) return null;
   return <span className="faint" style={{ fontSize: 12 }}> · {bits.join(' · ')}</span>;
 }
@@ -98,9 +207,7 @@ function RefBadges({ refs }: { refs: string }) {
   const parts = refs.split(',').map((r) => r.trim().replace(/^HEAD -> /, '')).filter(Boolean);
   return (
     <span className="hstack" style={{ gap: 4 }}>
-      {parts.slice(0, 3).map((r) => (
-        <span key={r} className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>{r}</span>
-      ))}
+      {parts.slice(0, 3).map((r) => <span key={r} className="tag" style={{ fontSize: 10, padding: '1px 6px' }}>{r}</span>)}
     </span>
   );
 }

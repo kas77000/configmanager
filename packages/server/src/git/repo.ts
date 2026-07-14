@@ -88,9 +88,18 @@ export class ConfigRepo {
     await this.serialize(() => git(this.dir, ['branch', name, from]));
   }
 
-  /** Returns the file's content at a ref/branch without checking it out. */
+  /** Returns the managed file's content at a ref/branch without checking it out. */
   async readFile(ref: string): Promise<string> {
     return git(this.dir, ['show', `${ref}:${this.file}`]);
+  }
+
+  /** Returns a named file's content at a ref/branch. */
+  async readNamedFile(ref: string, file: string): Promise<string> {
+    return git(this.dir, ['show', `${ref}:${file}`]);
+  }
+
+  async fileExistsAt(ref: string, file: string): Promise<boolean> {
+    return (await runGit(this.dir, ['cat-file', '-e', `${ref}:${file}`])).code === 0;
   }
 
   /** Writes `content` on `branch` and commits it authored by `author`. Returns the new commit hash. */
@@ -143,6 +152,38 @@ export class ConfigRepo {
       await runGit(this.dir, ['merge', '--abort']);
       return { ok: false, conflicts };
     });
+  }
+
+  async branchExists(name: string): Promise<boolean> {
+    return (await runGit(this.dir, ['rev-parse', '--verify', '--quiet', `refs/heads/${name}`])).code === 0;
+  }
+
+  /** Deletes a branch, first checking out another so git never refuses the current branch. */
+  async deleteBranch(name: string): Promise<void> {
+    return this.serialize(async () => {
+      const others = (await this.listBranches()).filter((b) => b !== name);
+      if (others.length > 0) await git(this.dir, ['checkout', others[0]]);
+      await git(this.dir, ['branch', '-D', name]);
+    });
+  }
+
+  /** Writes/commits a single named file on a branch (used to add or update a managed file). */
+  async commitFile(branch: string, file: string, content: string, author: Author, message: string): Promise<string> {
+    if (!isValidBranchName(branch)) throw new Error(`invalid branch name: ${branch}`);
+    return this.serialize(async () => {
+      await git(this.dir, ['checkout', branch]);
+      await writeFile(join(this.dir, file), content);
+      await git(this.dir, ['add', file]);
+      const res = await runGit(this.dir, ['commit', '-m', message, '--author', `${author.name} <${author.email}>`]);
+      if (res.code !== 0) throw new Error(`commit failed: ${res.stderr || res.stdout}`);
+      return (await git(this.dir, ['rev-parse', 'HEAD'])).trim();
+    });
+  }
+
+  /** Full patch for a single commit (metadata + diff), for the history commit view. */
+  async showCommit(hash: string): Promise<string> {
+    if (!/^[0-9a-fA-F]{4,40}$/.test(hash)) throw new Error('invalid commit hash');
+    return git(this.dir, ['show', hash, '--patch', '--format=fuller']);
   }
 
   /** Commit graph across all branches, newest first. */

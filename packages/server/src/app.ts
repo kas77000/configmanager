@@ -3,13 +3,13 @@ import type { ConfigRepo } from './git/repo';
 import type { UserDirectory } from './store/users';
 import type { AuditLog } from './store/audit';
 import type { Change, ChangeStore } from './store/changes';
+import { InstanceStore, isValidInstanceCode } from './store/instances';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
 import { checkDrift } from './verify';
 import type { InstanceReader } from './instance-reader';
-import { MANAGED_FILE, instanceBranch, instanceInfos, isInstance } from './config';
+import { MANAGED_FILE, instanceBranch } from './config';
 
-/** Author recorded for content pulled in from a live instance. */
 const SERVICE_ACCOUNT = { name: 'Service Account', email: 'service-account@local' };
 
 export interface AppDeps {
@@ -17,6 +17,7 @@ export interface AppDeps {
   users: UserDirectory;
   audit: AuditLog;
   changes: ChangeStore;
+  instances: InstanceStore;
   reader: InstanceReader;
   identity: { header: string; devUser?: string };
 }
@@ -27,40 +28,47 @@ const wrap =
     fn(req as AuthedRequest, res).catch(next);
   };
 
-/** Resolves the working branch for a (change, instance) pair, or null if the pair is invalid. */
 function targetBranch(change: Change, instance: string): string | null {
   const t = change.targets.find((x) => x.instance === instance);
   return t ? t.branch : null;
 }
 
 export function createApp(deps: AppDeps): Express {
-  const { repo, users, audit, changes, reader } = deps;
+  const { repo, users, audit, changes, instances, reader } = deps;
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
   const api = express.Router();
   api.use(identityMiddleware(users, deps.identity));
 
-  const denyPending = (req: AuthedRequest, res: express.Response): boolean => {
+  function isAdmin(req: AuthedRequest, res: express.Response): boolean {
+    if (requireUser(req).role !== 'admin') {
+      res.status(403).json({ error: 'admin only' });
+      return false;
+    }
+    return true;
+  }
+  function denyPending(req: AuthedRequest, res: express.Response): boolean {
     if (requireUser(req).role === 'pending') {
       res.status(403).json({ error: 'your account is pending role assignment' });
       return true;
     }
     return false;
+  }
+  const author = (req: AuthedRequest) => {
+    const u = requireUser(req);
+    return { name: u.displayName, email: u.email || `${u.windowsId}@local` };
   };
 
-  api.get('/me', wrap(async (req, res) => {
-    res.json(requireUser(req));
-  }));
+  api.get('/me', wrap(async (req, res) => res.json(requireUser(req))));
 
-  // --- User administration -------------------------------------------------
+  // --- Users (admin) -------------------------------------------------------
   api.get('/users', wrap(async (req, res) => {
-    if (requireUser(req).role !== 'admin') { res.status(403).json({ error: 'admin only' }); return; }
+    if (!isAdmin(req, res)) return;
     res.json(await users.list());
   }));
-
   api.post('/users/:id/role', wrap(async (req, res) => {
-    if (requireUser(req).role !== 'admin') { res.status(403).json({ error: 'admin only' }); return; }
+    if (!isAdmin(req, res)) return;
     const role = req.body?.role;
     if (role !== 'admin' && role !== 'editor' && role !== 'pending') {
       res.status(400).json({ error: 'role must be admin|editor|pending' });
@@ -71,98 +79,126 @@ export function createApp(deps: AppDeps): Express {
     res.json(updated);
   }));
 
-  // --- Instances (per-instance canonical versions) -------------------------
-  api.get('/instances', wrap(async (_req, res) => {
-    res.json(instanceInfos());
+  // --- Instances -----------------------------------------------------------
+  api.get('/instances', wrap(async (_req, res) => res.json(await instances.list())));
+
+  api.post('/instances', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const code = String(req.body?.code ?? '').trim();
+    const environment = req.body?.environment;
+    const uat = req.body?.uat === true;
+    const copyFrom = req.body?.copyFrom ? String(req.body.copyFrom) : undefined;
+    if (!isValidInstanceCode(code)) { res.status(400).json({ error: 'invalid instance code' }); return; }
+    if (environment !== 'pilot' && environment !== 'production') { res.status(400).json({ error: 'environment must be pilot|production' }); return; }
+    if (await instances.has(code)) { res.status(409).json({ error: 'instance already exists' }); return; }
+    const all = await instances.list();
+    const template = copyFrom ? all.find((i) => i.code === copyFrom) : all[0];
+    if (!template) { res.status(400).json({ error: 'no template instance to branch from' }); return; }
+
+    await repo.createBranch(instanceBranch(code), instanceBranch(template.code));
+    let created;
+    try {
+      created = await instances.create({ code, environment, uat, files: [...template.files] });
+    } catch (e) {
+      if (await repo.branchExists(instanceBranch(code))) await repo.deleteBranch(instanceBranch(code));
+      res.status(409).json({ error: (e as Error).message });
+      return;
+    }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-instance', branch: instanceBranch(code), details: { environment, uat } });
+    res.status(201).json(created);
+  }));
+
+  api.patch('/instances/:code', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const patch: { environment?: 'pilot' | 'production'; uat?: boolean } = {};
+    if (req.body?.environment !== undefined) {
+      if (req.body.environment !== 'pilot' && req.body.environment !== 'production') { res.status(400).json({ error: 'environment must be pilot|production' }); return; }
+      patch.environment = req.body.environment;
+    }
+    if (req.body?.uat !== undefined) patch.uat = req.body.uat === true;
+    const updated = await instances.update(req.params.code, patch);
+    if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-instance', branch: instanceBranch(req.params.code), details: patch });
+    res.json(updated);
+  }));
+
+  api.delete('/instances/:code', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const code = req.params.code;
+    if (!(await instances.has(code))) { res.status(404).json({ error: 'instance not found' }); return; }
+    await instances.remove(code);
+    if (await repo.branchExists(instanceBranch(code))) await repo.deleteBranch(instanceBranch(code));
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'delete-instance', branch: instanceBranch(code) });
+    res.json({ deleted: true });
+  }));
+
+  api.post('/instances/:code/files', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const code = req.params.code;
+    const file = String(req.body?.file ?? '').trim();
+    const content = typeof req.body?.content === 'string' ? req.body.content : '';
+    if (!file || file.includes('..') || file.includes('/') || file.includes('\\')) { res.status(400).json({ error: 'invalid file name' }); return; }
+    if (!(await instances.has(code))) { res.status(404).json({ error: 'instance not found' }); return; }
+    const branch = instanceBranch(code);
+    if (!(await repo.fileExistsAt(branch, file))) {
+      await repo.commitFile(branch, file, content, author(req), `add managed file ${file}`);
+    }
+    const updated = await instances.addFile(code, file);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'add-file', branch, details: { file } });
+    res.status(201).json(updated);
+  }));
+
+  api.delete('/instances/:code/files/:file', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const updated = await instances.removeFile(req.params.code, req.params.file);
+    if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'remove-file', branch: instanceBranch(req.params.code), details: { file: req.params.file } });
+    res.json(updated);
   }));
 
   api.get('/instances/:code/file', wrap(async (req, res) => {
-    if (!isInstance(req.params.code)) { res.status(404).json({ error: 'unknown instance' }); return; }
-    res.json({ instance: req.params.code, content: await repo.readFile(instanceBranch(req.params.code)) });
+    const inst = await instances.get(req.params.code);
+    if (!inst) { res.status(404).json({ error: 'unknown instance' }); return; }
+    const file = typeof req.query.file === 'string' ? req.query.file : inst.files[0];
+    if (!file) { res.status(404).json({ error: 'no managed file' }); return; }
+    try {
+      res.json({ instance: inst.code, file, content: await repo.readNamedFile(instanceBranch(inst.code), file) });
+    } catch {
+      res.status(404).json({ error: 'file not found on instance' });
+    }
   }));
 
-  // Read-only dry-run: fetch the live file via the service account and compare (no ingest).
-  api.post('/instances/:code/verify', wrap(async (req, res) => {
-    const code = req.params.code;
-    if (!isInstance(code)) { res.status(404).json({ error: 'unknown instance' }); return; }
-    const live = await reader.read(code, MANAGED_FILE);
-    if (live === null) { res.status(502).json({ error: 'instance unreachable' }); return; }
-    const recorded = await repo.readFile(instanceBranch(code));
-    const result = checkDrift(code, recorded, live);
-    await audit.append({
-      windowsId: requireUser(req).windowsId,
-      ip: req.ip,
-      action: 'verify-instance',
-      branch: instanceBranch(code),
-      details: { inSync: result.inSync },
-    });
-    res.json(result);
-  }));
-
-  // Pull-if-different: fetch live; if it differs from the recorded version, ingest it as a
-  // new commit on the instance branch. If identical, do nothing. Never writes to the instance.
   api.post('/instances/:code/sync', wrap(async (req, res) => {
-    const user = requireUser(req);
     if (denyPending(req, res)) return;
     const code = req.params.code;
-    if (!isInstance(code)) { res.status(404).json({ error: 'unknown instance' }); return; }
+    if (!(await instances.has(code))) { res.status(404).json({ error: 'unknown instance' }); return; }
     const live = await reader.read(code, MANAGED_FILE);
     if (live === null) { res.status(502).json({ error: 'instance unreachable' }); return; }
     const recorded = await repo.readFile(instanceBranch(code));
     const drift = checkDrift(code, recorded, live);
-    if (drift.inSync) {
-      res.json({ updated: false, ...drift });
-      return;
-    }
-    const commit = await repo.writeCommit(
-      instanceBranch(code),
-      live,
-      SERVICE_ACCOUNT,
-      `sync: import live ${MANAGED_FILE} from ${code}`,
-    );
-    await audit.append({
-      windowsId: user.windowsId,
-      ip: req.ip,
-      action: 'sync-import',
-      branch: instanceBranch(code),
-      commit,
-      details: { recordedSha: drift.recordedSha, liveSha: drift.liveSha },
-    });
+    if (drift.inSync) { res.json({ updated: false, ...drift }); return; }
+    const commit = await repo.commitFile(instanceBranch(code), MANAGED_FILE, live, SERVICE_ACCOUNT, `sync: import live ${MANAGED_FILE} from ${code}`);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'sync-import', branch: instanceBranch(code), commit });
     res.json({ updated: true, commit, ...drift });
   }));
 
-  // --- Changes (a methodology fanned out across instances) -----------------
-  api.get('/changes', wrap(async (_req, res) => {
-    res.json(await changes.list());
-  }));
+  // --- Changes -------------------------------------------------------------
+  api.get('/changes', wrap(async (_req, res) => res.json(await changes.list())));
 
   api.post('/changes', wrap(async (req, res) => {
-    const user = requireUser(req);
     if (denyPending(req, res)) return;
     const description = String(req.body?.description ?? '').trim();
-    const instances: unknown = req.body?.instances;
+    const list: unknown = req.body?.instances;
     if (!description) { res.status(400).json({ error: 'description required' }); return; }
-    if (!Array.isArray(instances) || instances.length === 0) {
-      res.status(400).json({ error: 'instances (non-empty array) required' });
-      return;
-    }
-    const bad = instances.filter((c) => !isInstance(String(c)));
+    if (!Array.isArray(list) || list.length === 0) { res.status(400).json({ error: 'instances (non-empty array) required' }); return; }
+    const codes = list.map(String);
+    const known = await Promise.all(codes.map((c) => instances.has(c)));
+    const bad = codes.filter((_, i) => !known[i]);
     if (bad.length) { res.status(400).json({ error: `unknown instances: ${bad.join(', ')}` }); return; }
 
-    const change = await changes.create({
-      description,
-      createdBy: user.windowsId,
-      instances: instances.map(String),
-    });
-    for (const target of change.targets) {
-      await repo.createBranch(target.branch, instanceBranch(target.instance));
-    }
-    await audit.append({
-      windowsId: user.windowsId,
-      ip: req.ip,
-      action: 'create-change',
-      details: { changeId: change.id, instances: change.targets.map((t) => t.instance) },
-    });
+    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, instances: codes });
+    for (const t of change.targets) await repo.createBranch(t.branch, instanceBranch(t.instance));
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: codes } });
     res.status(201).json(change);
   }));
 
@@ -172,69 +208,48 @@ export function createApp(deps: AppDeps): Express {
     res.json(change);
   }));
 
-  // --- Per-(change, instance) editing --------------------------------------
-  const resolve = async (
-    req: AuthedRequest,
-    res: express.Response,
-  ): Promise<{ change: Change; instance: string; branch: string } | null> => {
+  const resolve = async (req: AuthedRequest, res: express.Response): Promise<{ change: Change; instance: string; branch: string } | null> => {
     const change = await changes.get(req.params.id);
     if (!change) { res.status(404).json({ error: 'change not found' }); return null; }
-    const instance = req.params.code;
-    const branch = targetBranch(change, instance);
+    const branch = targetBranch(change, req.params.code);
     if (!branch) { res.status(404).json({ error: 'instance not part of this change' }); return null; }
-    return { change, instance, branch };
+    return { change, instance: req.params.code, branch };
   };
 
   api.get('/changes/:id/instances/:code/file', wrap(async (req, res) => {
-    const ctx = await resolve(req, res);
-    if (!ctx) return;
+    const ctx = await resolve(req, res); if (!ctx) return;
     res.json({ instance: ctx.instance, content: await repo.readFile(ctx.branch) });
   }));
 
   api.put('/changes/:id/instances/:code/file', wrap(async (req, res) => {
-    const user = requireUser(req);
     if (denyPending(req, res)) return;
-    const ctx = await resolve(req, res);
-    if (!ctx) return;
+    const ctx = await resolve(req, res); if (!ctx) return;
     const content = req.body?.content;
     const message = String(req.body?.message ?? '').trim();
     if (typeof content !== 'string') { res.status(400).json({ error: 'content (string) required' }); return; }
     if (!message) { res.status(400).json({ error: 'message required' }); return; }
-    const author = { name: user.displayName, email: user.email || `${user.windowsId}@local` };
-    const commit = await repo.writeCommit(ctx.branch, content, author, message);
-    await audit.append({
-      windowsId: user.windowsId,
-      ip: req.ip,
-      action: 'edit',
-      branch: ctx.branch,
-      commit,
-      details: { changeId: ctx.change.id, instance: ctx.instance },
-    });
+    const commit = await repo.writeCommit(ctx.branch, content, author(req), message);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'edit', branch: ctx.branch, commit, details: { changeId: ctx.change.id, instance: ctx.instance } });
     res.json({ instance: ctx.instance, commit });
   }));
 
   api.get('/changes/:id/instances/:code/diff', wrap(async (req, res) => {
-    const ctx = await resolve(req, res);
-    if (!ctx) return;
+    const ctx = await resolve(req, res); if (!ctx) return;
     res.json({ instance: ctx.instance, diff: await repo.diff(ctx.branch, instanceBranch(ctx.instance)) });
   }));
 
   api.get('/changes/:id/instances/:code/analysis', wrap(async (req, res) => {
-    const ctx = await resolve(req, res);
-    if (!ctx) return;
+    const ctx = await resolve(req, res); if (!ctx) return;
     res.json({ instance: ctx.instance, ...evaluateGate(await repo.readFile(ctx.branch)) });
   }));
 
   api.post('/changes/:id/instances/:code/merge', wrap(async (req, res) => {
     const user = requireUser(req);
     if (denyPending(req, res)) return;
-    const ctx = await resolve(req, res);
-    if (!ctx) return;
-
+    const ctx = await resolve(req, res); if (!ctx) return;
     const acknowledgeWarnings = req.body?.acknowledgeWarnings === true;
     const override = req.body?.override === true;
     const overrideReason = String(req.body?.overrideReason ?? '').trim();
-
     const gate = evaluateGate(await repo.readFile(ctx.branch));
 
     if (gate.errorCount > 0) {
@@ -242,25 +257,15 @@ export function createApp(deps: AppDeps): Express {
       if (user.role !== 'admin') { res.status(403).json({ error: 'only an admin can override errors', gate }); return; }
       if (!overrideReason) { res.status(400).json({ error: 'overrideReason required to override errors', gate }); return; }
     }
-    if (gate.warningCount > 0 && !acknowledgeWarnings) {
-      res.status(409).json({ error: 'warnings-need-acknowledgement', gate });
-      return;
-    }
+    if (gate.warningCount > 0 && !acknowledgeWarnings) { res.status(409).json({ error: 'warnings-need-acknowledgement', gate }); return; }
 
-    const author = { name: user.displayName, email: user.email || `${user.windowsId}@local` };
-    const result = await repo.merge(ctx.branch, author, instanceBranch(ctx.instance));
+    const result = await repo.merge(ctx.branch, author(req), instanceBranch(ctx.instance));
     if (!result.ok) { res.status(409).json({ error: 'merge-conflict', conflicts: result.conflicts }); return; }
-
     await changes.markMerged(ctx.change.id, ctx.instance, result.commit!);
     await audit.append({
-      windowsId: user.windowsId,
-      ip: req.ip,
-      action: 'merge',
-      branch: instanceBranch(ctx.instance),
-      commit: result.commit,
+      windowsId: user.windowsId, ip: req.ip, action: 'merge', branch: instanceBranch(ctx.instance), commit: result.commit,
       details: {
-        changeId: ctx.change.id,
-        instance: ctx.instance,
+        changeId: ctx.change.id, instance: ctx.instance,
         acknowledgedWarnings: acknowledgeWarnings && gate.warningCount > 0,
         override: override && gate.errorCount > 0,
         overrideReason: override && gate.errorCount > 0 ? overrideReason : undefined,
@@ -269,16 +274,22 @@ export function createApp(deps: AppDeps): Express {
     res.json({ merged: true, instance: ctx.instance, commit: result.commit });
   }));
 
-  // --- History -------------------------------------------------------------
+  // --- Commits & history ---------------------------------------------------
+  api.get('/commits/:hash', wrap(async (req, res) => {
+    try {
+      res.json({ hash: req.params.hash, patch: await repo.showCommit(req.params.hash) });
+    } catch {
+      res.status(404).json({ error: 'commit not found' });
+    }
+  }));
+
   api.get('/history', wrap(async (_req, res) => {
     res.json({ commits: await repo.log(), audit: await audit.list() });
   }));
 
   app.use('/api', api);
-
   app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     res.status(500).json({ error: err.message });
   });
-
   return app;
 }

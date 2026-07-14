@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react';
 import { NavLink, Route, Routes } from 'react-router-dom';
 import { api, getDevUser, setDevUser, type User } from './api';
 import { currentTheme, toggleTheme } from './theme';
-import { IconBranch, IconHistory, IconMoon, IconServer, IconSun } from './icons';
+import { IconBranch, IconHistory, IconMoon, IconServer, IconSettings, IconSun } from './icons';
 import Dashboard from './pages/Dashboard';
 import Changes from './pages/Changes';
 import ChangeDetail from './pages/ChangeDetail';
 import History from './pages/History';
+import Admin from './pages/Admin';
 
 export default function App() {
   const [me, setMe] = useState<User | null>(null);
@@ -29,6 +30,7 @@ export default function App() {
         <NavLink to="/" end className="nav-link"><IconServer />Instances</NavLink>
         <NavLink to="/changes" className="nav-link"><IconBranch />Changes</NavLink>
         <NavLink to="/history" className="nav-link"><IconHistory />History</NavLink>
+        {me?.role === 'admin' && <NavLink to="/admin" className="nav-link"><IconSettings />Admin</NavLink>}
 
         <div className="sidebar-foot">
           <button className="btn btn-ghost btn-sm" onClick={() => setTheme(toggleTheme())}>
@@ -53,6 +55,7 @@ export default function App() {
           <Route path="/changes" element={<Changes me={me} />} />
           <Route path="/changes/:id" element={<ChangeDetail me={me} />} />
           <Route path="/history" element={<History />} />
+          <Route path="/admin" element={<Admin me={me} />} />
         </Routes>
       </main>
     </div>

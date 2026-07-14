@@ -6,7 +6,7 @@ export type Role = 'admin' | 'editor' | 'pending';
 export interface User { windowsId: string; displayName: string; email: string; role: Role; }
 
 export type Environment = 'pilot' | 'production';
-export interface InstanceInfo { code: string; environment: Environment; uat: boolean; }
+export interface InstanceInfo { code: string; environment: Environment; uat: boolean; files: string[]; }
 
 export interface ChangeTarget { instance: string; file: string; branch: string; mergedCommit?: string; }
 export type ChangeStatus = 'draft' | 'merged' | 'cancelled';
@@ -56,9 +56,17 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
 export const api = {
   me: () => req<User>('GET', '/me'),
   instances: () => req<InstanceInfo[]>('GET', '/instances'),
-  instanceFile: (code: string) => req<{ instance: string; content: string }>('GET', `/instances/${code}/file`),
-  verify: (code: string) => req<DriftResult>('POST', `/instances/${code}/verify`, {}),
+  instanceFile: (code: string, file?: string) =>
+    req<{ instance: string; file: string; content: string }>('GET', `/instances/${code}/file${file ? `?file=${encodeURIComponent(file)}` : ''}`),
   sync: (code: string) => req<DriftResult & { updated: boolean; commit?: string }>('POST', `/instances/${code}/sync`, {}),
+
+  createInstance: (body: { code: string; environment: Environment; uat: boolean; copyFrom?: string }) => req<InstanceInfo>('POST', '/instances', body),
+  updateInstance: (code: string, patch: { environment?: Environment; uat?: boolean }) => req<InstanceInfo>('PATCH', `/instances/${code}`, patch),
+  deleteInstance: (code: string) => req<{ deleted: boolean }>('DELETE', `/instances/${code}`),
+  addInstanceFile: (code: string, file: string, content?: string) => req<InstanceInfo>('POST', `/instances/${code}/files`, { file, content }),
+  removeInstanceFile: (code: string, file: string) => req<InstanceInfo>('DELETE', `/instances/${code}/files/${encodeURIComponent(file)}`),
+
+  commit: (hash: string) => req<{ hash: string; patch: string }>('GET', `/commits/${hash}`),
 
   changes: () => req<Change[]>('GET', '/changes'),
   createChange: (description: string, instances: string[]) => req<Change>('POST', '/changes', { description, instances }),

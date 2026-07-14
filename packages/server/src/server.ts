@@ -3,11 +3,12 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createApp } from './app';
 import { ConfigRepo } from './git/repo';
-import { seedRepo } from './bootstrap';
+import { seedInstances, seedRepo } from './bootstrap';
 import { JsonStore } from './store/json-store';
 import { UserDirectory, type User } from './store/users';
 import { AuditLog, type AuditEvent } from './store/audit';
 import { ChangeStore, type Change } from './store/changes';
+import { InstanceStore, type ManagedInstance } from './store/instances';
 import { StaticInstanceReader } from './instance-reader';
 import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig } from './config';
 
@@ -21,16 +22,13 @@ export async function main(): Promise<void> {
   const users = new UserDirectory(new JsonStore<User[]>(join(cfg.dataDir, 'users.json'), []));
   const audit = new AuditLog(new JsonStore<AuditEvent[]>(join(cfg.dataDir, 'audit.json'), []));
   const changes = new ChangeStore(new JsonStore<Change[]>(join(cfg.dataDir, 'changes.json'), []));
+  const instances = new InstanceStore(new JsonStore<ManagedInstance[]>(join(cfg.dataDir, 'instances.json'), []));
+  await seedInstances(instances);
 
-  // Phase 1: no live connectivity configured yet — real service-account reader plugs in here.
   const reader = new StaticInstanceReader();
 
   const app = createApp({
-    repo,
-    users,
-    audit,
-    changes,
-    reader,
+    repo, users, audit, changes, instances, reader,
     identity: { header: IDENTITY_HEADER, devUser: process.env[DEV_USER_ENV] },
   });
 
@@ -40,7 +38,6 @@ export async function main(): Promise<void> {
   });
 }
 
-// Only start the server when run directly (not when imported by tests).
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   main().catch((err) => {
     // eslint-disable-next-line no-console
