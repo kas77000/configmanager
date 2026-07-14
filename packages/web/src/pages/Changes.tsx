@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { canEdit, api, type Change, type InstanceInfo, type User } from '../api';
-import { ChangeStatusBadge, Skeleton, relTime } from '../components';
+import { Banner, ChangeStatusBadge, Skeleton, relTime } from '../components';
 import { IconBranch, IconPlus } from '../icons';
 
 export default function Changes({ me }: { me: User | null }) {
@@ -107,70 +107,72 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
 
   async function submit() {
     setErr(null);
-    if (!description.trim()) return setErr('Describe the change.');
-    if (picked.size === 0) return setErr('Select at least one instance.');
-    if (pickedFiles.size === 0) return setErr('Select at least one config file.');
     setBusy(true);
     try {
       const change = await api.createChange(description.trim(), [...picked], [...pickedFiles]);
       nav(`/changes/${change.id}`);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'failed');
+      setErr(e instanceof Error ? e.message : 'Could not create the change.');
       setBusy(false);
     }
   }
 
   const groups: ('pilot' | 'production')[] = ['pilot', 'production'];
+  const sel = { borderColor: 'var(--accent)', color: 'var(--accent)' };
+  const labelStyle = { display: 'block', fontSize: 12, color: 'var(--text)', fontWeight: 600, marginBottom: 8 } as const;
+  const valid = description.trim().length > 0 && picked.size > 0 && pickedFiles.size > 0;
 
   return (
-    <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
-      <label className="field">
-        <span>Description (the methodology)</span>
-        <textarea className="input" value={description} onChange={(e) => setDescription(e.target.value)}
-          placeholder="e.g. Restrict Post order layering to 1 in Korea (add 144=1)" />
-      </label>
+    <div className="panel" style={{ padding: 24, marginBottom: 24 }}>
+      <div className="stack" style={{ gap: 22 }}>
+        <label style={{ display: 'block' }}>
+          <span style={labelStyle}>Description</span>
+          <textarea className="input" style={{ minHeight: 76 }} value={description} onChange={(e) => setDescription(e.target.value)}
+            placeholder="e.g. Restrict Post order layering to 1 in Korea (add 144=1)" />
+        </label>
 
-      <div className="field">
-        <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>Target instances</span>
-        {groups.map((g) => (
-          <div key={g} style={{ marginBottom: 8 }}>
-            <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>{g}</div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-              {instances.filter((i) => i.environment === g).map((i) => (
-                <button key={i.code} type="button" className="btn btn-sm"
-                  style={picked.has(i.code) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-                  onClick={() => toggle(picked, setPicked, i.code)}>
-                  {i.code}{i.uat ? ' · UAT' : ''}
-                </button>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      <div className="field">
-        <span style={{ display: 'block', fontSize: 12, color: 'var(--muted)', marginBottom: 6, fontWeight: 500 }}>Config files</span>
-        {picked.size === 0 ? (
-          <div className="faint" style={{ fontSize: 12 }}>Select instances first.</div>
-        ) : availableFiles.length === 0 ? (
-          <div className="badge warning" style={{ fontSize: 12 }}>The selected instances share no managed files.</div>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {availableFiles.map((f) => (
-              <button key={f} type="button" className="btn btn-sm mono"
-                style={pickedFiles.has(f) ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined}
-                onClick={() => toggle(pickedFiles, setPickedFiles, f)}>{f}</button>
+        <div>
+          <div style={labelStyle}>Target instances{picked.size > 0 && <span className="faint" style={{ fontWeight: 400 }}> · {picked.size} selected</span>}</div>
+          <div className="stack" style={{ gap: 14 }}>
+            {groups.map((g) => (
+              <div key={g}>
+                <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>{g}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {instances.filter((i) => i.environment === g).map((i) => (
+                    <button key={i.code} type="button" className="btn btn-sm" style={picked.has(i.code) ? sel : undefined}
+                      onClick={() => toggle(picked, setPicked, i.code)}>{i.code}{i.uat ? ' · UAT' : ''}</button>
+                  ))}
+                </div>
+              </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
 
-      {err && <div style={{ marginBottom: 10 }}><span className="badge error">{err}</span></div>}
-      <div className="hstack">
-        <button className="btn btn-primary" onClick={submit} disabled={busy}>
-          {busy ? <span className="spinner" /> : <IconPlus />}Create change
-        </button>
-        <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+        <div>
+          <div style={labelStyle}>Config files{pickedFiles.size > 0 && <span className="faint" style={{ fontWeight: 400 }}> · {pickedFiles.size} selected</span>}</div>
+          {picked.size === 0 ? (
+            <div className="faint" style={{ fontSize: 12 }}>Select one or more instances first.</div>
+          ) : availableFiles.length === 0 ? (
+            <div className="faint" style={{ fontSize: 12 }}>The selected instances share no managed files.</div>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {availableFiles.map((f) => (
+                <button key={f} type="button" className="btn btn-sm mono" style={pickedFiles.has(f) ? sel : undefined}
+                  onClick={() => toggle(pickedFiles, setPickedFiles, f)}>{f}</button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {err && <Banner kind="error">{err}</Banner>}
+
+        <div className="hstack" style={{ gap: 10, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
+          <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>
+            {busy ? <span className="spinner" /> : <IconPlus />}Create change
+          </button>
+          <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Add a description, pick instances, and choose files.</span>}
+        </div>
       </div>
     </div>
   );
