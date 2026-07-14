@@ -2,11 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
-import { analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
+import { KNOWN_FIELDS, analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
 import { ApiError, canApprove, canEdit, api, type Change, type ChangeTarget, type Gate, type User } from '../api';
 import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
-import { IconCheck, IconMerge } from '../icons';
+import { IconCheck, IconMerge, IconPlus, IconX } from '../icons';
 
 const FIXMSG = 'ai.fixmsg.properties';
 
@@ -115,6 +115,9 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
   const [cursorLine, setCursorLine] = useState(1);
   const [showDiff, setShowDiff] = useState(false);
   const [diff, setDiff] = useState('');
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [commentOpen, setCommentOpen] = useState(false);
+  const [commentText, setCommentText] = useState('');
 
   const editorRef = useRef<Monaco.editor.IStandaloneCodeEditor | null>(null);
   const monacoRef = useRef<typeof Monaco | null>(null);
@@ -172,6 +175,33 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
   }
   function toggleDiff() { const n = !showDiff; setShowDiff(n); if (n) loadDiff(); }
 
+  // ---- Row builder: line-level helpers operating at the cursor line ----
+  function updateContent(next: string) {
+    setFiles((m) => ({ ...m, [activeFile]: { content: next, saved: m[activeFile].saved } }));
+  }
+  function toggleComment() {
+    if (!fs) return;
+    const lines = fs.content.split('\n');
+    const i = cursorLine - 1;
+    if (i < 0 || i >= lines.length) return;
+    lines[i] = /^\s*#/.test(lines[i]) ? lines[i].replace(/^(\s*)#\s?/, '$1') : `#${lines[i]}`;
+    updateContent(lines.join('\n'));
+  }
+  function deleteLine() {
+    if (!fs) return;
+    const lines = fs.content.split('\n');
+    const i = cursorLine - 1;
+    if (i < 0 || i >= lines.length) return;
+    lines.splice(i, 1);
+    updateContent(lines.join('\n'));
+  }
+  function insertAfterCursor(text: string) {
+    if (!fs) return;
+    const lines = fs.content.split('\n');
+    lines.splice(Math.min(cursorLine, lines.length), 0, text);
+    updateContent(lines.join('\n'));
+  }
+
   if (!fs) return <div className="panel"><Skeleton rows={6} /></div>;
   const cursorRule = parsed?.rules.find((r) => r.lineNumber === cursorLine && r.kind === 'rule');
 
@@ -199,6 +229,21 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
             <button className="btn btn-sm btn-primary" onClick={save} disabled={!dirty || saving || merged || me?.role === 'pending'}>{saving ? <span className="spinner" /> : null}Save</button>
             <button className="btn btn-sm" onClick={toggleDiff}>{showDiff ? 'Hide diff' : 'Diff'}</button>
           </div>
+          <div className="editor-toolbar" style={{ gap: 6, flexWrap: 'wrap' }}>
+            <span className="faint" style={{ fontSize: 11 }}>line {cursorLine}</span>
+            <button className="btn btn-sm" onClick={toggleComment} disabled={merged}>Comment / Uncomment</button>
+            <button className="btn btn-sm" onClick={deleteLine} disabled={merged}>Delete line</button>
+            <button className="btn btn-sm" onClick={() => { setCommentOpen((v) => !v); setBuilderOpen(false); }} disabled={merged}>Add comment</button>
+            {isFixmsg && <button className="btn btn-sm btn-primary" onClick={() => { setBuilderOpen((v) => !v); setCommentOpen(false); }} disabled={merged}>Add rule…</button>}
+          </div>
+          {commentOpen && (
+            <div className="editor-toolbar" style={{ gap: 6 }}>
+              <input className="input" style={{ height: 26, flex: 1 }} placeholder="comment text" value={commentText} onChange={(e) => setCommentText(e.target.value)} autoFocus />
+              <button className="btn btn-sm btn-primary" disabled={!commentText.trim()} onClick={() => { insertAfterCursor(`# ${commentText.trim()}`); setCommentText(''); setCommentOpen(false); }}>Insert</button>
+              <button className="btn btn-sm btn-ghost" onClick={() => setCommentOpen(false)}>Cancel</button>
+            </div>
+          )}
+          {builderOpen && isFixmsg && <RuleBuilder onInsert={(l) => { insertAfterCursor(l); setBuilderOpen(false); }} onClose={() => setBuilderOpen(false)} />}
           <div style={{ flex: 1, minHeight: 0 }}>
             <Editor height="100%" defaultLanguage="ini" theme={currentTheme() === 'dark' ? 'vs-dark' : 'light'}
               path={activeFile} value={fs.content} onChange={(v) => setFiles((m) => ({ ...m, [activeFile]: { ...m[activeFile], content: v ?? '' } }))} onMount={onMount}
@@ -336,6 +381,65 @@ function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVer
 
       {conflicts && <div style={{ marginTop: 10 }}><Banner kind="warning">Merge conflict in {conflicts.join(', ')}. Update this branch from the instance version and re-resolve.</Banner></div>}
       {error && !conflicts && !hasErrors && <div style={{ marginTop: 10 }}><span className="badge error">{error}</span></div>}
+    </div>
+  );
+}
+
+function RuleBuilder({ onInsert, onClose }: { onInsert: (line: string) => void; onClose: () => void }) {
+  const [algo, setAlgo] = useState('');
+  const [outputs, setOutputs] = useState<{ key: string; value: string }[]>([{ key: '', value: '' }]);
+  const [conds, setConds] = useState<{ field: string; op: string; value: string }[]>([{ field: '', op: '=', value: '' }]);
+  const fields = useMemo(() => [...KNOWN_FIELDS].sort(), []);
+  const ops = ['=', '!=', '<', '>', '<=', '>=', '~', '!~'];
+
+  function gen(): string {
+    const o = outputs.filter((x) => x.key.trim()).map((x) => `${x.key.trim()}=${x.value.trim()}`).join('^');
+    let left = '';
+    if (algo.trim()) left += `9001=${algo.trim()};`;
+    if (o) left += `9012=${o}`;
+    const c = conds.filter((x) => x.field.trim()).map((x) => `${x.field.trim()}${x.op}${x.value.trim()}`).join(', ');
+    return c ? `${left} :: ${c}` : left;
+  }
+  const preview = gen();
+  const setOut = (i: number, patch: Partial<{ key: string; value: string }>) => setOutputs((a) => a.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+  const setCond = (i: number, patch: Partial<{ field: string; op: string; value: string }>) => setConds((a) => a.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
+
+  return (
+    <div style={{ borderBottom: '1px solid var(--border)', padding: 12, background: 'var(--raised)', overflow: 'auto', maxHeight: 320 }}>
+      <div className="insp-label" style={{ marginBottom: 6 }}>Tags to set (9012)</div>
+      {outputs.map((o, i) => (
+        <div key={i} className="hstack" style={{ gap: 6, marginBottom: 6 }}>
+          <input className="input mono" style={{ height: 26, width: 120 }} placeholder="tag (e.g. 144)" value={o.key} onChange={(e) => setOut(i, { key: e.target.value })} />
+          <span className="faint">=</span>
+          <input className="input mono" style={{ height: 26, width: 120 }} placeholder="value" value={o.value} onChange={(e) => setOut(i, { value: e.target.value })} />
+          <button className="btn btn-sm btn-ghost" onClick={() => setOutputs((a) => a.filter((_, idx) => idx !== i))}><IconX style={{ width: 12, height: 12 }} /></button>
+        </div>
+      ))}
+      <button className="btn btn-sm btn-ghost" onClick={() => setOutputs((a) => [...a, { key: '', value: '' }])}><IconPlus style={{ width: 12, height: 12 }} />tag</button>
+
+      <div className="insp-label" style={{ margin: '12px 0 6px' }}>Algo (9001) — optional</div>
+      <input className="input mono" style={{ height: 26, width: 160 }} placeholder="e.g. VWAP" value={algo} onChange={(e) => setAlgo(e.target.value)} />
+
+      <div className="insp-label" style={{ margin: '12px 0 6px' }}>Conditions (all must hold)</div>
+      {conds.map((c, i) => (
+        <div key={i} className="hstack" style={{ gap: 6, marginBottom: 6 }}>
+          <input className="input mono" style={{ height: 26, width: 190 }} list="rb-fields" placeholder="field" value={c.field} onChange={(e) => setCond(i, { field: e.target.value })} />
+          <select className="input" style={{ height: 26, width: 64, padding: '0 6px' }} value={c.op} onChange={(e) => setCond(i, { op: e.target.value })}>{ops.map((op) => <option key={op} value={op}>{op}</option>)}</select>
+          <input className="input mono" style={{ height: 26, width: 150 }} placeholder="value (^ = OR)" value={c.value} onChange={(e) => setCond(i, { value: e.target.value })} />
+          <button className="btn btn-sm btn-ghost" onClick={() => setConds((a) => a.filter((_, idx) => idx !== i))}><IconX style={{ width: 12, height: 12 }} /></button>
+        </div>
+      ))}
+      <button className="btn btn-sm btn-ghost" onClick={() => setConds((a) => [...a, { field: '', op: '=', value: '' }])}><IconPlus style={{ width: 12, height: 12 }} />condition</button>
+      <datalist id="rb-fields">{fields.map((f) => <option key={f} value={f} />)}</datalist>
+
+      <div style={{ marginTop: 12 }}>
+        <div className="insp-label" style={{ marginBottom: 4 }}>Preview</div>
+        <div className="mono" style={{ fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{preview || '…'}</div>
+      </div>
+      <div className="hstack" style={{ marginTop: 10 }}>
+        <button className="btn btn-sm btn-primary" disabled={!preview.trim()} onClick={() => onInsert(preview)}><IconPlus style={{ width: 13, height: 13 }} />Insert rule</button>
+        <button className="btn btn-sm btn-ghost" onClick={onClose}>Cancel</button>
+      </div>
     </div>
   );
 }
