@@ -67,10 +67,21 @@ Two clarifications reshaped the version model after the initial design:
    same intent to different instance files produces different concrete diffs. Rule-engine
    analysis therefore runs **per instance version**.
 
-3. **Verify, don't deploy.** The app is a history store **plus a read-only drift verifier**:
-   on request it compares the *live* instance file against the version it recorded and flags
-   drift. It does **not** push/deploy to servers (that coupling is removed). Copying changes
-   onto instances stays a manual/out-of-app step in Phase 1.
+3. **Pull, don't push.** The app reads live config **from** instances (via the service
+   account, behind an `InstanceReader` interface) but never writes **to** them. Two
+   operations: **verify** (read-only compare, flags drift) and **sync** (fetch live and, only
+   when it differs from the recorded version, ingest it as a `Service Account` commit on the
+   instance branch — identical content is a no-op). Copying changes *onto* instances stays a
+   manual/out-of-app step in Phase 1.
+
+4. **Instance environments.** Each instance has an environment — `pilot`, `uat`, or
+   `production`. **APIH is UAT.** The pilot/production split is configurable metadata
+   (placeholder until the team confirms it) and is exposed on `GET /instances` for the
+   workflow to use (e.g. pilot-first rollout).
+
+5. **Multi-config ready.** A change targets `(instance, file)` pairs; Phase 1 operates the
+   single `ai.fixmsg.properties`, but the model carries `file` so several configs across
+   several instances fit without reshaping.
 
 Everywhere below that says "the canonical `main` copy" now means "the targeted instance's
 branch"; "merge to `main`" means "merge the change's per-instance branch into that instance's
