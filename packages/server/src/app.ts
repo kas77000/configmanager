@@ -2,8 +2,10 @@ import express, { type Express, type RequestHandler } from 'express';
 import type { ConfigRepo } from './git/repo';
 import { ROLES, type UserDirectory, canApprove, canEdit } from './store/users';
 import type { AuditLog } from './store/audit';
-import type { Change, ChangeStore, ChangeTarget } from './store/changes';
+import type { Change, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
+import type { JiraClient } from './jira';
+import { approvalEmail, recapEmail, toEml } from './email';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
 import { checkDrift } from './verify';
@@ -19,6 +21,9 @@ export interface AppDeps {
   changes: ChangeStore;
   instances: InstanceStore;
   reader: InstanceReader;
+  jira: JiraClient;
+  /** Base URL of the web app, used in email links. */
+  appBaseUrl: string;
   identity: { header: string; devUser?: string };
 }
 
@@ -29,7 +34,7 @@ const wrap =
   };
 
 export function createApp(deps: AppDeps): Express {
-  const { repo, users, audit, changes, instances, reader } = deps;
+  const { repo, users, audit, changes, instances, reader, jira } = deps;
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
@@ -312,8 +317,37 @@ export function createApp(deps: AppDeps): Express {
     const change = await changes.decide(req.params.id, requireUser(req).windowsId, 'approved');
     if (!change) { res.status(404).json({ error: 'change not found' }); return; }
     if (change.status !== 'approved') { res.status(409).json({ error: 'change is not awaiting approval' }); return; }
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'approve-change', details: { changeId: change.id } });
-    res.json(change);
+
+    // On approval, create one Jira ticket per config file. Jira failures never block approval.
+    const files = [...new Set(change.targets.flatMap((t) => t.files))];
+    const tickets: JiraTicket[] = [];
+    for (const file of files) {
+      const targeted = change.targets.filter((t) => t.files.includes(file)).map((t) => t.instance);
+      try {
+        const { key, url } = await jira.createIssue(
+          `[Config] ${change.description} — ${file}`,
+          `Change ${change.id}\nFile: ${file}\nInstances: ${targeted.join(', ')}\n${deps.appBaseUrl}/changes/${change.id}`,
+        );
+        tickets.push({ file, key, url });
+      } catch { /* keep approval even if Jira is down */ }
+    }
+    const finalChange = tickets.length ? await changes.setJiraTickets(change.id, tickets) : change;
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'approve-change', details: { changeId: change.id, jira: tickets.map((t) => t.key) } });
+    res.json(finalChange);
+  }));
+
+  // Downloadable Outlook draft (.eml with X-Unsent) for the approval request / recap.
+  api.get('/changes/:id/email/:kind', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
+    const change = await changes.get(req.params.id);
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    const kind = req.params.kind;
+    if (kind !== 'approval' && kind !== 'recap') { res.status(404).json({ error: 'unknown email kind' }); return; }
+    const recipients = (await users.list()).filter((u) => canApprove(u.role) && u.email).map((u) => u.email);
+    const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl) : approvalEmail(change, recipients, deps.appBaseUrl);
+    res.setHeader('Content-Type', 'message/rfc822');
+    res.setHeader('Content-Disposition', `attachment; filename="change-${change.id}-${kind}.eml"`);
+    res.send(toEml(email));
   }));
 
   api.post('/changes/:id/reject', wrap(async (req, res) => {

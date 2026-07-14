@@ -12,6 +12,7 @@ import { AuditLog, type AuditEvent } from '../src/store/audit';
 import { ChangeStore, type Change } from '../src/store/changes';
 import { InstanceStore, type ManagedInstance } from '../src/store/instances';
 import { StaticInstanceReader } from '../src/instance-reader';
+import { StubJiraClient } from '../src/jira';
 import { seedInstances, seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
@@ -37,7 +38,7 @@ async function makeHarness(): Promise<Harness> {
   reader.set('APIA', FILE, CLEAN); // live matches recorded by default
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', role: 'admin' });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', role: 'editor' });
-  const app = createApp({ repo, users, audit, changes, instances, reader, identity: { header: HEADER } });
+  const app = createApp({ repo, users, audit, changes, instances, reader, jira: new StubJiraClient(), appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
@@ -241,6 +242,30 @@ describe('API (per-instance)', () => {
 
     // now an editor can merge
     await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('creates Jira tickets on approval and generates an Outlook approval draft', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', role: 'approver', email: 'boss@x' }).expect(201);
+    await as(h.app, 'root')('post', '/api/instances/APIA/files').send({ file: 'risk.properties', content: 'r=0\n' }).expect(201);
+
+    const id = (await ed('post', '/api/changes').send({ description: 'Korea 144=1', instances: ['APIA'], files: [FILE, 'risk.properties'] }).expect(201)).body.id;
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
+
+    const approved = await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
+    expect(approved.body.jiraTickets).toHaveLength(2);
+    expect(approved.body.jiraTickets.map((t: { file: string }) => t.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
+    expect(approved.body.jiraTickets[0].key).toMatch(/^CFG-\d+$/);
+
+    const eml = await ed('get', `/api/changes/${id}/email/approval`).expect(200);
+    expect(eml.headers['content-type']).toContain('message/rfc822');
+    expect(eml.text).toContain('X-Unsent: 1');
+    expect(eml.text).toContain('boss@x');
+    expect(eml.text).toContain('Newly applies to instances');
+    expect(eml.text).toContain('risk.properties');
     await rm(h.dir, { recursive: true, force: true });
   });
 

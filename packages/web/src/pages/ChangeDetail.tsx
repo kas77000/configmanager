@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { KNOWN_FIELDS, analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
-import { ApiError, canApprove, canEdit, api, type Change, type ChangeTarget, type Gate, type User } from '../api';
+import { ApiError, canApprove, canEdit, api, downloadEml, type Change, type ChangeTarget, type Gate, type User } from '../api';
 import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
 import { IconCheck, IconMerge, IconPlus, IconX } from '../icons';
@@ -75,16 +75,21 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
     finally { setBusy(false); }
   }
 
+  const requester = canEdit(me?.role);
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
       <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div className="hstack gap-lg" style={{ flexWrap: 'wrap' }}>
           <ChangeStatusBadge status={change.status} />
-          {change.jira && <span className="tag mono">{change.jira}</span>}
+          {(change.jiraTickets ?? []).map((t) => <a key={t.key} className="tag mono" href={t.url} target="_blank" rel="noreferrer" title={t.file} style={{ color: 'var(--accent)' }}>{t.key}</a>)}
           {change.status === 'submitted' && change.submittedBy && <span className="faint" style={{ fontSize: 12 }}>submitted by <span className="mono">{change.submittedBy}</span></span>}
           {change.decision && <span className="faint" style={{ fontSize: 12 }}>{change.decision.action} by <span className="mono">{change.decision.by}</span> · {relTime(change.decision.at)}{change.decision.reason ? ` · "${change.decision.reason}"` : ''}</span>}
         </div>
-        <div className="hstack">
+        <div className="hstack" style={{ flexWrap: 'wrap' }}>
+          {requester && (change.status === 'draft' || change.status === 'submitted' || change.status === 'rejected') &&
+            <button className="btn btn-sm" disabled={busy} onClick={() => act(downloadEml(change.id, 'approval'))} title="Opens a pre-filled Outlook draft to send to approvers">Approval email…</button>}
+          {requester && change.status === 'merged' &&
+            <button className="btn btn-sm" disabled={busy} onClick={() => act(downloadEml(change.id, 'recap'))} title="Opens a pre-filled Outlook recap draft">Recap email…</button>}
           {canSubmit && <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(api.submitChange(change.id))}>Submit for approval</button>}
           {canDecide && <button className="btn btn-sm" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} disabled={busy} onClick={() => act(api.approveChange(change.id))}><IconCheck style={{ width: 14, height: 14 }} />Approve</button>}
           {canDecide && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setRejecting((v) => !v)}>Reject</button>}

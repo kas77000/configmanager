@@ -67,6 +67,8 @@ export interface ServerConfig {
   /** Path to the file whose contents seed the repo on first init. */
   seedFile: string;
   port: number;
+  /** Base URL of the web app, used in email links. */
+  appBaseUrl: string;
 }
 
 const root = process.cwd();
@@ -76,4 +78,5 @@ export const defaultConfig: ServerConfig = {
   dataDir: join(root, 'data'),
   seedFile: join(root, MANAGED_FILE),
   port: Number(process.env.PORT ?? 4000),
+  appBaseUrl: process.env.APP_BASE_URL ?? 'http://localhost:5173',
 };

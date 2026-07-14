@@ -20,6 +20,8 @@ export interface ChangeDecision {
   reason?: string;
 }
 
+export interface JiraTicket { file: string; key: string; url: string; }
+
 export interface Change {
   id: string;
   /** The methodology being applied (free text). */
@@ -30,8 +32,8 @@ export interface Change {
   status: ChangeStatus;
   submittedBy?: string;
   submittedAt?: string;
-  /** Optional JIRA ticket reference (set up later). */
-  jira?: string;
+  /** Jira tickets created on approval, one per config file. */
+  jiraTickets?: JiraTicket[];
   decision?: ChangeDecision;
 }
 
@@ -100,6 +102,15 @@ export class ChangeStore {
       change.submittedBy = by;
       change.submittedAt = this.now().toISOString();
       change.decision = undefined;
+      return change;
+    });
+  }
+
+  async setJiraTickets(id: string, tickets: JiraTicket[]): Promise<Change | undefined> {
+    return this.store.update((changes) => {
+      const change = changes.find((c) => c.id === id);
+      if (!change) return undefined;
+      change.jiraTickets = tickets;
       return change;
     });
   }

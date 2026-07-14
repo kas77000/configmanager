@@ -27,10 +27,11 @@ export interface InstanceInfo { code: string; environment: Environment; uat: boo
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
 export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
+export interface JiraTicket { file: string; key: string; url: string; }
 export interface Change {
   id: string; description: string; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
-  submittedBy?: string; submittedAt?: string; jira?: string; decision?: ChangeDecision;
+  submittedBy?: string; submittedAt?: string; jiraTickets?: JiraTicket[]; decision?: ChangeDecision;
 }
 
 export interface Gate { findings: Finding[]; errorCount: number; warningCount: number; infoCount: number; }
@@ -60,6 +61,21 @@ export class ApiError extends Error {
 const DEV_USER_KEY = 'cm.devUser';
 export function getDevUser(): string { return localStorage.getItem(DEV_USER_KEY) ?? 'salavat'; }
 export function setDevUser(id: string): void { localStorage.setItem(DEV_USER_KEY, id); }
+
+/** Downloads a change's Outlook draft (.eml). The user opens it to review and send. */
+export async function downloadEml(id: string, kind: 'approval' | 'recap'): Promise<void> {
+  const res = await fetch(`/api/changes/${id}/email/${kind}`, { headers: { 'x-remote-user': getDevUser() } });
+  if (!res.ok) throw new ApiError(res.status, await res.json().catch(() => ({})));
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `change-${id}-${kind}.eml`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api${url}`, {

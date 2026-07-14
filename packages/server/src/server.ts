@@ -10,6 +10,7 @@ import { AuditLog, type AuditEvent } from './store/audit';
 import { ChangeStore, type Change } from './store/changes';
 import { InstanceStore, type ManagedInstance } from './store/instances';
 import { StaticInstanceReader } from './instance-reader';
+import { makeJiraClient } from './jira';
 import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig } from './config';
 
 export async function main(): Promise<void> {
@@ -34,9 +35,11 @@ export async function main(): Promise<void> {
   }
 
   const reader = new StaticInstanceReader();
+  const jira = makeJiraClient(process.env);
 
   const app = createApp({
-    repo, users, audit, changes, instances, reader,
+    repo, users, audit, changes, instances, reader, jira,
+    appBaseUrl: cfg.appBaseUrl,
     identity: { header: IDENTITY_HEADER, devUser: process.env[DEV_USER_ENV] },
   });
 

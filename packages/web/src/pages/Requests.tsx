@@ -80,10 +80,10 @@ function RequestCard({ c, decide, run }: { c: Change; decide: boolean; run: <T>(
     <div className="panel" style={{ padding: 16 }}>
       <div className="row-between" style={{ alignItems: 'flex-start' }}>
         <div>
-          <div className="hstack" style={{ marginBottom: 4 }}>
+          <div className="hstack" style={{ marginBottom: 4, flexWrap: 'wrap' }}>
             <span className="mono" style={{ fontWeight: 600 }}>{c.id}</span>
             <ChangeStatusBadge status={c.status} />
-            {c.jira && <span className="tag mono">{c.jira}</span>}
+            {(c.jiraTickets ?? []).map((t) => <a key={t.key} className="tag mono" href={t.url} target="_blank" rel="noreferrer" title={t.file} style={{ color: 'var(--accent)' }}>{t.key}</a>)}
           </div>
           <div style={{ fontSize: 14, marginBottom: 6 }}>{c.description}</div>
           <div className="faint" style={{ fontSize: 12 }}>
