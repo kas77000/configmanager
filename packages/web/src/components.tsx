@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
-import type { Finding, InstanceInfo } from './api';
+import type { ChangeStatus, Finding, InstanceInfo } from './api';
 import { IconAlertTriangle, IconDiamond, IconInfo } from './icons';
+
+export function ChangeStatusBadge({ status }: { status: ChangeStatus }) {
+  const map: Record<ChangeStatus, string> = {
+    draft: 'neutral', submitted: 'info', approved: 'success', rejected: 'error', merged: 'success', cancelled: 'neutral',
+  };
+  return <span className={`badge ${map[status]} badge-pill`} style={{ fontSize: 11 }}>{status}</span>;
+}
 
 export function EnvTag({ info }: { info: InstanceInfo }) {
   return (
@@ -59,16 +66,24 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
+// Strip git's plumbing lines so only the actual content changes show.
+function isNoise(l: string): boolean {
+  return l.startsWith('diff --git ') || l.startsWith('index ') || l.startsWith('--- ') ||
+    l.startsWith('+++ ') || l.startsWith('@@') || l.startsWith('new file mode ') ||
+    l.startsWith('deleted file mode ') || l.startsWith('similarity index ') ||
+    l.startsWith('rename from ') || l.startsWith('rename to ') || l.startsWith('\\ No newline');
+}
+
 export function DiffLines({ patch, maxHeight = 360 }: { patch: string; maxHeight?: number }) {
-  const lines = patch.split('\n');
+  const lines = patch.split('\n').filter((l) => !isNoise(l));
+  if (lines.every((l) => l.trim() === '')) return <div className="empty">No content changes.</div>;
   return (
     <div className="diff" style={{ padding: '8px 0', maxHeight }}>
       {lines.map((l, i) => {
-        const cls = l.startsWith('+') && !l.startsWith('+++') ? 'add'
-          : l.startsWith('-') && !l.startsWith('---') ? 'del'
-          : l.startsWith('@@') ? 'hunk'
-          : l.startsWith('diff ') ? 'hunk' : '';
-        return <span key={i} className={`ln ${cls}`}>{l || ' '}</span>;
+        const cls = l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : '';
+        // show the changed content without the leading +/- marker
+        const text = cls ? l.slice(1) : l;
+        return <span key={i} className={`ln ${cls}`}>{text || ' '}</span>;
       })}
     </div>
   );

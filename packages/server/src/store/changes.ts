@@ -11,7 +11,14 @@ export interface ChangeTarget {
   mergedCommit?: string;
 }
 
-export type ChangeStatus = 'draft' | 'merged' | 'cancelled';
+export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
+
+export interface ChangeDecision {
+  by: string;
+  at: string;
+  action: 'approved' | 'rejected';
+  reason?: string;
+}
 
 export interface Change {
   id: string;
@@ -21,6 +28,11 @@ export interface Change {
   createdAt: string;
   targets: ChangeTarget[];
   status: ChangeStatus;
+  submittedBy?: string;
+  submittedAt?: string;
+  /** Optional JIRA ticket reference (set up later). */
+  jira?: string;
+  decision?: ChangeDecision;
 }
 
 export interface NewChange {
@@ -74,6 +86,32 @@ export class ChangeStore {
       const target = change.targets.find((t) => t.instance === instance);
       if (target) target.mergedCommit = commit;
       if (change.targets.every((t) => t.mergedCommit)) change.status = 'merged';
+      return change;
+    });
+  }
+
+  /** Submits a draft/rejected change for approval. */
+  async submit(id: string, by: string): Promise<Change | undefined> {
+    return this.store.update((changes) => {
+      const change = changes.find((c) => c.id === id);
+      if (!change) return undefined;
+      if (change.status !== 'draft' && change.status !== 'rejected') return change;
+      change.status = 'submitted';
+      change.submittedBy = by;
+      change.submittedAt = this.now().toISOString();
+      change.decision = undefined;
+      return change;
+    });
+  }
+
+  /** Records an approve/reject decision on a submitted change. */
+  async decide(id: string, by: string, action: 'approved' | 'rejected', reason?: string): Promise<Change | undefined> {
+    return this.store.update((changes) => {
+      const change = changes.find((c) => c.id === id);
+      if (!change) return undefined;
+      if (change.status !== 'submitted') return change;
+      change.status = action;
+      change.decision = { by, at: this.now().toISOString(), action, reason };
       return change;
     });
   }

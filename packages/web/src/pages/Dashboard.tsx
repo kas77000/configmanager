@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api, type InstanceInfo, type User } from '../api';
 import { EnvTag, Skeleton, UatTag } from '../components';
+import { IconChevron } from '../icons';
 
 export default function Dashboard(_props: { me: User | null }) {
   const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
+  const nav = useNavigate();
 
   useEffect(() => {
     api.instances().then(setInstances).catch(() => setInstances([]));
@@ -41,13 +44,15 @@ export default function Dashboard(_props: { me: User | null }) {
                     <tr>
                       <th style={{ width: 160 }}>Instance</th>
                       <th>Environment</th>
+                      <th style={{ width: 130, textAlign: 'right' }}>Current config</th>
                     </tr>
                   </thead>
                   <tbody>
                     {items.map((i) => (
-                      <tr key={i.code}>
+                      <tr key={i.code} className="rowlink" onClick={() => nav(`/instances/${i.code}`)}>
                         <td className="mono" style={{ fontWeight: 600 }}>{i.code}</td>
                         <td><span className="hstack"><EnvTag info={i} />{i.uat && <UatTag />}</span></td>
+                        <td style={{ textAlign: 'right' }}><span className="faint hstack" style={{ justifyContent: 'flex-end', fontSize: 12 }}>view<IconChevron style={{ width: 13, height: 13 }} /></span></td>
                       </tr>
                     ))}
                   </tbody>

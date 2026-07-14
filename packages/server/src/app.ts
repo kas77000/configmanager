@@ -1,6 +1,6 @@
 import express, { type Express, type RequestHandler } from 'express';
 import type { ConfigRepo } from './git/repo';
-import type { UserDirectory } from './store/users';
+import { ROLES, type UserDirectory, canApprove, canEdit } from './store/users';
 import type { AuditLog } from './store/audit';
 import type { Change, ChangeStore, ChangeTarget } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
@@ -43,12 +43,13 @@ export function createApp(deps: AppDeps): Express {
     }
     return true;
   }
-  function denyPending(req: AuthedRequest, res: express.Response): boolean {
-    if (requireUser(req).role === 'pending') {
-      res.status(403).json({ error: 'your account is pending role assignment' });
-      return true;
-    }
-    return false;
+  function requireEdit(req: AuthedRequest, res: express.Response): boolean {
+    if (!canEdit(requireUser(req).role)) { res.status(403).json({ error: 'you do not have permission to create or edit changes' }); return false; }
+    return true;
+  }
+  function requireApprove(req: AuthedRequest, res: express.Response): boolean {
+    if (!canApprove(requireUser(req).role)) { res.status(403).json({ error: 'you do not have permission to approve changes' }); return false; }
+    return true;
   }
   const author = (req: AuthedRequest) => {
     const u = requireUser(req);
@@ -62,16 +63,41 @@ export function createApp(deps: AppDeps): Express {
     if (!isAdmin(req, res)) return;
     res.json(await users.list());
   }));
-  api.post('/users/:id/role', wrap(async (req, res) => {
+  api.post('/users', wrap(async (req, res) => {
     if (!isAdmin(req, res)) return;
+    const windowsId = String(req.body?.windowsId ?? '').trim();
     const role = req.body?.role;
-    if (role !== 'admin' && role !== 'editor' && role !== 'pending') {
-      res.status(400).json({ error: 'role must be admin|editor|pending' });
-      return;
-    }
-    const updated = await users.setRole(req.params.id, role);
-    if (!updated) { res.status(404).json({ error: 'user not found' }); return; }
-    res.json(updated);
+    if (!windowsId) { res.status(400).json({ error: 'windowsId required' }); return; }
+    if (!ROLES.includes(role)) { res.status(400).json({ error: `role must be one of ${ROLES.join('|')}` }); return; }
+    const user = await users.upsert({
+      windowsId,
+      displayName: String(req.body?.displayName ?? '').trim() || windowsId,
+      email: String(req.body?.email ?? '').trim(),
+      role,
+    });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'add-user', details: { user: windowsId, role } });
+    res.status(201).json(user);
+  }));
+  api.patch('/users/:id', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const existing = await users.get(req.params.id);
+    if (!existing) { res.status(404).json({ error: 'user not found' }); return; }
+    if (req.body?.role !== undefined && !ROLES.includes(req.body.role)) { res.status(400).json({ error: 'invalid role' }); return; }
+    const user = await users.upsert({
+      windowsId: existing.windowsId,
+      displayName: req.body?.displayName !== undefined ? String(req.body.displayName) : existing.displayName,
+      email: req.body?.email !== undefined ? String(req.body.email) : existing.email,
+      role: req.body?.role !== undefined ? req.body.role : existing.role,
+    });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-user', details: { user: user.windowsId, role: user.role } });
+    res.json(user);
+  }));
+  api.delete('/users/:id', wrap(async (req, res) => {
+    if (!isAdmin(req, res)) return;
+    const removed = await users.remove(req.params.id);
+    if (!removed) { res.status(404).json({ error: 'user not found' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'remove-user', details: { user: req.params.id } });
+    res.json({ deleted: true });
   }));
 
   // --- Instances -----------------------------------------------------------
@@ -164,7 +190,7 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.post('/instances/:code/sync', wrap(async (req, res) => {
-    if (denyPending(req, res)) return;
+    if (!requireEdit(req, res)) return;
     const code = req.params.code;
     if (!(await instances.has(code))) { res.status(404).json({ error: 'unknown instance' }); return; }
     const live = await reader.read(code, MANAGED_FILE);
@@ -181,7 +207,7 @@ export function createApp(deps: AppDeps): Express {
   api.get('/changes', wrap(async (_req, res) => res.json(await changes.list())));
 
   api.post('/changes', wrap(async (req, res) => {
-    if (denyPending(req, res)) return;
+    if (!requireEdit(req, res)) return;
     const description = String(req.body?.description ?? '').trim();
     const instList: unknown = req.body?.instances;
     const fileList: unknown = req.body?.files;
@@ -240,12 +266,13 @@ export function createApp(deps: AppDeps): Express {
   };
 
   api.get('/changes/:id/instances/:code/files/:file', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
     const ctx = await resolveFile(req, res); if (!ctx) return;
     res.json({ instance: ctx.target.instance, file: ctx.file, content: await repo.readNamedFile(ctx.target.branch, ctx.file) });
   }));
 
   api.put('/changes/:id/instances/:code/files/:file', wrap(async (req, res) => {
-    if (denyPending(req, res)) return;
+    if (!requireEdit(req, res)) return;
     const ctx = await resolveFile(req, res); if (!ctx) return;
     const content = req.body?.content;
     const message = String(req.body?.message ?? '').trim();
@@ -257,11 +284,13 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   api.get('/changes/:id/instances/:code/files/:file/diff', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
     const ctx = await resolveFile(req, res); if (!ctx) return;
     res.json({ instance: ctx.target.instance, file: ctx.file, diff: await repo.diffNamed(ctx.target.branch, instanceBranch(ctx.target.instance), ctx.file) });
   }));
 
   api.get('/changes/:id/instances/:code/files/:file/analysis', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
     const ctx = await resolveFile(req, res); if (!ctx) return;
     const gate = ctx.file === MANAGED_FILE
       ? evaluateGate(await repo.readNamedFile(ctx.target.branch, ctx.file))
@@ -269,10 +298,39 @@ export function createApp(deps: AppDeps): Express {
     res.json({ instance: ctx.target.instance, file: ctx.file, ...gate });
   }));
 
+  api.post('/changes/:id/submit', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
+    const change = await changes.submit(req.params.id, requireUser(req).windowsId);
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    if (change.status !== 'submitted') { res.status(409).json({ error: 'change cannot be submitted from its current state' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'submit-change', details: { changeId: change.id } });
+    res.json(change);
+  }));
+
+  api.post('/changes/:id/approve', wrap(async (req, res) => {
+    if (!requireApprove(req, res)) return;
+    const change = await changes.decide(req.params.id, requireUser(req).windowsId, 'approved');
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    if (change.status !== 'approved') { res.status(409).json({ error: 'change is not awaiting approval' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'approve-change', details: { changeId: change.id } });
+    res.json(change);
+  }));
+
+  api.post('/changes/:id/reject', wrap(async (req, res) => {
+    if (!requireApprove(req, res)) return;
+    const reason = String(req.body?.reason ?? '').trim();
+    const change = await changes.decide(req.params.id, requireUser(req).windowsId, 'rejected', reason || undefined);
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    if (change.status !== 'rejected') { res.status(409).json({ error: 'change is not awaiting approval' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'reject-change', details: { changeId: change.id, reason } });
+    res.json(change);
+  }));
+
   api.post('/changes/:id/instances/:code/merge', wrap(async (req, res) => {
     const user = requireUser(req);
-    if (denyPending(req, res)) return;
+    if (!requireEdit(req, res)) return;
     const ctx = await resolveTarget(req, res); if (!ctx) return;
+    if (ctx.change.status !== 'approved') { res.status(403).json({ error: 'change-not-approved' }); return; }
     const acknowledgeWarnings = req.body?.acknowledgeWarnings === true;
     const override = req.body?.override === true;
     const overrideReason = String(req.body?.overrideReason ?? '').trim();

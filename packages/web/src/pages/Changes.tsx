@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, type Change, type InstanceInfo, type User } from '../api';
-import { EnvTag, Skeleton, UatTag, relTime } from '../components';
+import { canEdit, api, type Change, type InstanceInfo, type User } from '../api';
+import { ChangeStatusBadge, Skeleton, relTime } from '../components';
 import { IconBranch, IconPlus } from '../icons';
 
 export default function Changes({ me }: { me: User | null }) {
@@ -14,7 +14,7 @@ export default function Changes({ me }: { me: User | null }) {
     api.instances().then(setInstances).catch(() => setInstances([]));
   }, []);
 
-  const canEdit = me && me.role !== 'pending';
+  const canCreate = canEdit(me?.role);
 
   return (
     <div className="page">
@@ -24,12 +24,12 @@ export default function Changes({ me }: { me: User | null }) {
           <h1>Changes</h1>
           <p>A change is one methodology applied across instances. Each targeted instance gets its own edit and its own review.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setCreating((v) => !v)} disabled={!canEdit}>
+        <button className="btn btn-primary" onClick={() => setCreating((v) => !v)} disabled={!canCreate}>
           <IconPlus />New change
         </button>
       </div>
 
-      {creating && canEdit && (
+      {creating && canCreate && (
         <NewChange instances={instances} onCancel={() => setCreating(false)} />
       )}
 
@@ -69,15 +69,10 @@ function ChangeRow({ c }: { c: Change }) {
       <td className="mono" style={{ fontWeight: 600 }}>{c.id}</td>
       <td>{c.description}</td>
       <td className="mono faint" style={{ fontSize: 12 }}>{c.targets.map((t) => t.instance).join(', ')}</td>
-      <td><StatusPill status={c.status} /></td>
+      <td><ChangeStatusBadge status={c.status} /></td>
       <td className="faint" style={{ fontSize: 12 }}>{relTime(c.createdAt)}</td>
     </tr>
   );
-}
-
-function StatusPill({ status }: { status: Change['status'] }) {
-  const cls = status === 'merged' ? 'success' : status === 'cancelled' ? 'neutral' : 'info';
-  return <span className={`badge ${cls} badge-pill`} style={{ fontSize: 11 }}>{status}</span>;
 }
 
 function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCancel: () => void }) {

@@ -25,6 +25,14 @@ export async function main(): Promise<void> {
   const instances = new InstanceStore(new JsonStore<ManagedInstance[]>(join(cfg.dataDir, 'instances.json'), []));
   await seedInstances(instances);
 
+  // Dev convenience: outside production, the default dev identity is an admin so you can
+  // drive the whole app immediately. A real reverse proxy + Windows auth is used in prod.
+  if (process.env.NODE_ENV !== 'production') {
+    const devUser = process.env[DEV_USER_ENV] || 'salavat';
+    await users.ensure(devUser);
+    await users.setRole(devUser, 'admin');
+  }
+
   const reader = new StaticInstanceReader();
 
   const app = createApp({

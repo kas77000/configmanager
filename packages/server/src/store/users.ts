@@ -1,6 +1,24 @@
 import { JsonStore } from './json-store';
 
-export type Role = 'admin' | 'editor' | 'pending';
+/**
+ * admin      = app owner (manage users/instances, do everything)
+ * approver   = boss (create/review changes AND approve/reject)
+ * editor     = quant team (create + review changes)
+ * stakeholder= approve/reject only; sees request description + instances, not the config
+ * pending    = unassigned
+ */
+export type Role = 'admin' | 'approver' | 'editor' | 'stakeholder' | 'pending';
+
+export const ROLES: Role[] = ['admin', 'approver', 'editor', 'stakeholder', 'pending'];
+
+/** Can create and edit changes / config. */
+export function canEdit(role: Role): boolean {
+  return role === 'admin' || role === 'approver' || role === 'editor';
+}
+/** Can approve or reject a submitted change. */
+export function canApprove(role: Role): boolean {
+  return role === 'admin' || role === 'approver' || role === 'stakeholder';
+}
 
 export interface User {
   windowsId: string;
@@ -52,6 +70,15 @@ export class UserDirectory {
       if (existing) Object.assign(existing, user);
       else users.push(user);
       return { ...user };
+    });
+  }
+
+  async remove(windowsId: string): Promise<boolean> {
+    return this.store.update((users) => {
+      const i = users.findIndex((u) => u.windowsId === windowsId);
+      if (i === -1) return false;
+      users.splice(i, 1);
+      return true;
     });
   }
 }

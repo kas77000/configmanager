@@ -51,6 +51,11 @@ async function newChange(app: Express, instances: string[]): Promise<string> {
   return res.body.id as string;
 }
 
+async function submitAndApprove(app: Express, id: string): Promise<void> {
+  await as(app, 'ed')('post', `/api/changes/${id}/submit`).expect(200);
+  await as(app, 'root')('post', `/api/changes/${id}/approve`).expect(200);
+}
+
 describe('API (per-instance)', () => {
   it('rejects requests with no identity', async () => {
     const h = await makeHarness();
@@ -151,7 +156,8 @@ describe('API (per-instance)', () => {
     expect(ra.body.errorCount).toBe(0);
     expect(ra.body.warningCount).toBe(0);
 
-    // one merge applies both files to the instance
+    // one merge applies both files to the instance (after approval)
+    await submitAndApprove(h.app, cid);
     await ed('post', `/api/changes/${cid}/instances/APIA/merge`).send({}).expect(200);
     const f1 = await ed('get', '/api/instances/APIA/file').expect(200);
     expect(f1.body.content).toContain('JP');
@@ -169,6 +175,7 @@ describe('API (per-instance)', () => {
     const analysis = await ed('get', `/api/changes/${id}/instances/APIA/files/${FILE}/analysis`).expect(200);
     expect(analysis.body.errorCount).toBe(0);
     expect(analysis.body.warningCount).toBe(0);
+    await submitAndApprove(h.app, id);
     const merge = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     expect(merge.body.merged).toBe(true);
     const file = await ed('get', '/api/instances/APIA/file').expect(200);
@@ -182,6 +189,7 @@ describe('API (per-instance)', () => {
     const ed = as(h.app, 'ed');
     const bad = '9012=1=1 :: orderSizeADV < 0.07, orderSizeADV >= 0.15\n';
     await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: bad, message: 'oops' }).expect(200);
+    await submitAndApprove(h.app, id);
 
     await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(403);
     await ed('post', `/api/changes/${id}/instances/APIA/merge`)
@@ -201,11 +209,38 @@ describe('API (per-instance)', () => {
     const ed = as(h.app, 'ed');
     const warn = '9012=6=8 :: compositeExchangeCode=HK\n9012=6=12 :: compositeExchangeCode=HK\n';
     await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: warn, message: 'dup' }).expect(200);
+    await submitAndApprove(h.app, id);
     const needsAck = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({});
     expect(needsAck.status).toBe(409);
     const ok = await ed('post', `/api/changes/${id}/instances/APIA/merge`)
       .send({ acknowledgeWarnings: true }).expect(200);
     expect(ok.body.merged).toBe(true);
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('gates merge behind approval and enforces roles', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'stake', role: 'stakeholder' }).expect(201);
+
+    const id = (await ed('post', '/api/changes').send({ description: 'Korea 144=1', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
+
+    // cannot merge before approval
+    await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(403);
+
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
+    // an editor cannot approve
+    await ed('post', `/api/changes/${id}/approve`).expect(403);
+    // a stakeholder cannot see the config
+    await as(h.app, 'stake')('get', `/api/changes/${id}/instances/APIA/files/${FILE}`).expect(403);
+    // but can approve
+    const approved = await as(h.app, 'stake')('post', `/api/changes/${id}/approve`).expect(200);
+    expect(approved.body.status).toBe('approved');
+    expect(approved.body.decision).toMatchObject({ by: 'stake', action: 'approved' });
+
+    // now an editor can merge
+    await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -238,11 +273,13 @@ describe('API (per-instance)', () => {
     const ed = as(h.app, 'ed');
     await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`)
       .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'edit' }).expect(200);
+    await submitAndApprove(h.app, id);
     await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     const history = await ed('get', '/api/history').expect(200);
     const actions = history.body.audit.map((e: { action: string }) => e.action);
-    expect(actions).toEqual(['create-change', 'edit', 'merge']);
-    expect(history.body.audit.every((e: { windowsId: string }) => e.windowsId === 'ed')).toBe(true);
+    expect(actions).toEqual(['create-change', 'edit', 'submit-change', 'approve-change', 'merge']);
+    expect(history.body.audit.find((e: { action: string; windowsId: string }) => e.action === 'merge')?.windowsId).toBe('ed');
+    expect(history.body.audit.find((e: { action: string; windowsId: string }) => e.action === 'approve-change')?.windowsId).toBe('root');
     await rm(h.dir, { recursive: true, force: true });
   });
 });

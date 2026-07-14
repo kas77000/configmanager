@@ -2,17 +2,35 @@ import type { Finding } from '@config-manager/rule-engine';
 
 export type { Finding };
 
-export type Role = 'admin' | 'editor' | 'pending';
+export type Role = 'admin' | 'approver' | 'editor' | 'stakeholder' | 'pending';
+export const ROLES: Role[] = ['admin', 'approver', 'editor', 'stakeholder', 'pending'];
 export interface User { windowsId: string; displayName: string; email: string; role: Role; }
+
+export const ROLE_LABEL: Record<Role, string> = {
+  admin: 'Admin',
+  approver: 'Boss (approver)',
+  editor: 'Quant (editor)',
+  stakeholder: 'Stakeholder',
+  pending: 'Pending',
+};
+
+export function canEdit(role?: Role): boolean {
+  return role === 'admin' || role === 'approver' || role === 'editor';
+}
+export function canApprove(role?: Role): boolean {
+  return role === 'admin' || role === 'approver' || role === 'stakeholder';
+}
 
 export type Environment = 'pilot' | 'production';
 export interface InstanceInfo { code: string; environment: Environment; uat: boolean; files: string[]; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
-export type ChangeStatus = 'draft' | 'merged' | 'cancelled';
+export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
+export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
 export interface Change {
   id: string; description: string; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
+  submittedBy?: string; submittedAt?: string; jira?: string; decision?: ChangeDecision;
 }
 
 export interface Gate { findings: Finding[]; errorCount: number; warningCount: number; infoCount: number; }
@@ -74,9 +92,17 @@ export const api = {
 
   commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 
+  users: () => req<User[]>('GET', '/users'),
+  createUser: (body: { windowsId: string; displayName?: string; email?: string; role: Role }) => req<User>('POST', '/users', body),
+  updateUser: (id: string, patch: { displayName?: string; email?: string; role?: Role }) => req<User>('PATCH', `/users/${id}`, patch),
+  deleteUser: (id: string) => req<{ deleted: boolean }>('DELETE', `/users/${id}`),
+
   changes: () => req<Change[]>('GET', '/changes'),
   createChange: (description: string, instances: string[], files: string[]) => req<Change>('POST', '/changes', { description, instances, files }),
   change: (id: string) => req<Change>('GET', `/changes/${id}`),
+  submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),
+  approveChange: (id: string) => req<Change>('POST', `/changes/${id}/approve`, {}),
+  rejectChange: (id: string, reason: string) => req<Change>('POST', `/changes/${id}/reject`, { reason }),
 
   changeFile: (id: string, code: string, file: string) =>
     req<{ instance: string; file: string; content: string }>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}`),

@@ -3,8 +3,8 @@ import { useParams } from 'react-router-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
-import { ApiError, api, type Change, type ChangeTarget, type Gate, type User } from '../api';
-import { Banner, DiffLines, FindingIcon, GateSummary, Skeleton } from '../components';
+import { ApiError, canApprove, canEdit, api, type Change, type ChangeTarget, type Gate, type User } from '../api';
+import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
 import { IconCheck, IconMerge } from '../icons';
 
@@ -15,23 +15,31 @@ export default function ChangeDetail({ me }: { me: User | null }) {
   const [change, setChange] = useState<Change | null>(null);
   const [active, setActive] = useState<string>('');
 
+  function reload() { return api.change(id).then(setChange); }
   useEffect(() => {
     api.change(id).then((c) => { setChange(c); setActive((a) => a || c.targets[0]?.instance || ''); }).catch(() => setChange(null));
   }, [id]);
 
   if (!change) return <div className="page"><div className="panel"><Skeleton rows={6} /></div></div>;
   const target = change.targets.find((t) => t.instance === active);
+  const canSeeConfig = canEdit(me?.role);
 
   return (
     <div className="page">
       <div className="page-head">
         <div>
-          <div className="eyebrow">Change {change.id} · {change.status}</div>
+          <div className="eyebrow">Change {change.id}</div>
           <h1>{change.description}</h1>
           <p>Opened by <span className="mono">{change.createdBy}</span> · {change.targets.length} instance{change.targets.length > 1 ? 's' : ''}</p>
         </div>
       </div>
 
+      <ApprovalBar change={change} me={me} onChange={reload} />
+
+      {!canSeeConfig ? (
+        <div className="panel"><div className="empty">You can review and decide on this request, but the config editing is handled by the quant team.</div></div>
+      ) : (
+      <>
       <div className="rail-tabs" style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius)', marginBottom: 16, overflow: 'hidden' }}>
         {change.targets.map((t) => (
           <div key={t.instance} className={`rail-tab ${active === t.instance ? 'active' : ''}`} style={{ flex: 'none', padding: '9px 16px' }} onClick={() => setActive(t.instance)}>
@@ -43,16 +51,60 @@ export default function ChangeDetail({ me }: { me: User | null }) {
 
       {target && (
         <InstanceWorkspace key={target.instance} changeId={change.id} target={target} me={me}
-          merged={!!target.mergedCommit} onMerged={() => api.change(id).then(setChange)} />
+          merged={!!target.mergedCommit} approved={change.status === 'approved'} onMerged={reload} />
       )}
+      </>
+      )}
+    </div>
+  );
+}
+
+function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null; onChange: () => Promise<unknown> }) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const canSubmit = canEdit(me?.role) && (change.status === 'draft' || change.status === 'rejected');
+  const canDecide = canApprove(me?.role) && change.status === 'submitted';
+
+  async function act(p: Promise<unknown>) {
+    setBusy(true); setErr(null);
+    try { await p; await onChange(); setRejecting(false); setReason(''); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+      <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+        <div className="hstack gap-lg" style={{ flexWrap: 'wrap' }}>
+          <ChangeStatusBadge status={change.status} />
+          {change.jira && <span className="tag mono">{change.jira}</span>}
+          {change.status === 'submitted' && change.submittedBy && <span className="faint" style={{ fontSize: 12 }}>submitted by <span className="mono">{change.submittedBy}</span></span>}
+          {change.decision && <span className="faint" style={{ fontSize: 12 }}>{change.decision.action} by <span className="mono">{change.decision.by}</span> · {relTime(change.decision.at)}{change.decision.reason ? ` · "${change.decision.reason}"` : ''}</span>}
+        </div>
+        <div className="hstack">
+          {canSubmit && <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(api.submitChange(change.id))}>Submit for approval</button>}
+          {canDecide && <button className="btn btn-sm" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} disabled={busy} onClick={() => act(api.approveChange(change.id))}><IconCheck style={{ width: 14, height: 14 }} />Approve</button>}
+          {canDecide && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setRejecting((v) => !v)}>Reject</button>}
+        </div>
+      </div>
+      {rejecting && (
+        <div className="hstack" style={{ marginTop: 10 }}>
+          <input className="input" style={{ flex: 1 }} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Reason (optional)" />
+          <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(api.rejectChange(change.id, reason))}>Confirm reject</button>
+        </div>
+      )}
+      {err && <div style={{ marginTop: 8 }}><span className="badge error">{err}</span></div>}
     </div>
   );
 }
 
 interface FileState { content: string; saved: string }
 
-function InstanceWorkspace({ changeId, target, me, merged, onMerged }: {
-  changeId: string; target: ChangeTarget; me: User | null; merged: boolean; onMerged: () => void;
+function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }: {
+  changeId: string; target: ChangeTarget; me: User | null; merged: boolean; approved: boolean; onMerged: () => void;
 }) {
   const [activeFile, setActiveFile] = useState(target.files[0] ?? FIXMSG);
   const [files, setFiles] = useState<Record<string, FileState>>({});
@@ -171,7 +223,7 @@ function InstanceWorkspace({ changeId, target, me, merged, onMerged }: {
 
       {showDiff && (diff.trim() ? <DiffLines patch={diff} /> : <div className="panel"><div className="empty">No changes to {activeFile} yet.</div></div>)}
 
-      <MergePanel changeId={changeId} target={target} me={me} merged={merged} anyDirty={anyDirty} savedVersion={savedVersion} onMerged={onMerged} />
+      <MergePanel changeId={changeId} target={target} me={me} merged={merged} approved={approved} anyDirty={anyDirty} savedVersion={savedVersion} onMerged={onMerged} />
     </div>
   );
 }
@@ -207,8 +259,8 @@ function Inspector({ rule, line, findings }: { rule: Rule | undefined; line: num
   );
 }
 
-function MergePanel({ changeId, target, me, merged, anyDirty, savedVersion, onMerged }: {
-  changeId: string; target: ChangeTarget; me: User | null; merged: boolean; anyDirty: boolean; savedVersion: number; onMerged: () => void;
+function MergePanel({ changeId, target, me, merged, approved, anyDirty, savedVersion, onMerged }: {
+  changeId: string; target: ChangeTarget; me: User | null; merged: boolean; approved: boolean; anyDirty: boolean; savedVersion: number; onMerged: () => void;
 }) {
   const instance = target.instance;
   const [gate, setGate] = useState<Gate>({ findings: [], errorCount: 0, warningCount: 0, infoCount: 0 });
@@ -255,12 +307,13 @@ function MergePanel({ changeId, target, me, merged, anyDirty, savedVersion, onMe
           <GateSummary error={gate.errorCount} warning={gate.warningCount} info={gate.infoCount} />
         </div>
         <button className="btn btn-primary" onClick={merge}
-          disabled={busy || anyDirty || me?.role === 'pending' || (hasWarnings && !ack) || (hasErrors && !(isAdmin && override && reason.trim()))}>
+          disabled={busy || anyDirty || !approved || (hasWarnings && !ack) || (hasErrors && !(isAdmin && override && reason.trim()))}>
           {busy ? <span className="spinner" /> : <IconMerge />}Merge
         </button>
       </div>
 
-      {anyDirty && <div className="faint" style={{ fontSize: 12 }}>Save all edited files before merging.</div>}
+      {!approved && <div className="faint" style={{ fontSize: 12 }}>This change must be approved before it can be merged.</div>}
+      {approved && anyDirty && <div className="faint" style={{ fontSize: 12 }}>Save all edited files before merging.</div>}
 
       {hasWarnings && !hasErrors && (
         <label className="hstack" style={{ marginTop: 8, cursor: 'pointer' }}>
