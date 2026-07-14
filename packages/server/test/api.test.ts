@@ -10,6 +10,7 @@ import { JsonStore } from '../src/store/json-store';
 import { UserDirectory, type User } from '../src/store/users';
 import { AuditLog, type AuditEvent } from '../src/store/audit';
 import { ChangeStore, type Change } from '../src/store/changes';
+import { StaticInstanceReader } from '../src/instance-reader';
 import { seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
@@ -19,6 +20,7 @@ const HEADER = 'x-remote-user';
 interface Harness {
   app: Express;
   dir: string;
+  reader: StaticInstanceReader;
 }
 
 async function makeHarness(): Promise<Harness> {
@@ -28,10 +30,12 @@ async function makeHarness(): Promise<Harness> {
   const users = new UserDirectory(new JsonStore<User[]>(join(dir, 'users.json'), []));
   const audit = new AuditLog(new JsonStore<AuditEvent[]>(join(dir, 'audit.json'), []));
   const changes = new ChangeStore(new JsonStore<Change[]>(join(dir, 'changes.json'), []));
+  const reader = new StaticInstanceReader();
+  reader.set('APIA', FILE, CLEAN); // live matches recorded by default
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', role: 'admin' });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', role: 'editor' });
-  const app = createApp({ repo, users, audit, changes, identity: { header: HEADER } });
-  return { app, dir };
+  const app = createApp({ repo, users, audit, changes, reader, identity: { header: HEADER } });
+  return { app, dir, reader };
 }
 
 const as = (app: Express, id: string) => (method: 'get' | 'post' | 'put', url: string) =>
@@ -51,11 +55,14 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('lists all instances and their seeded content', async () => {
+  it('lists all instances with their environment (APIH is UAT)', async () => {
     const h = await makeHarness();
     const list = await as(h.app, 'ed')('get', '/api/instances').expect(200);
-    expect(list.body).toContain('APIA');
-    expect(list.body).toContain('APIM');
+    const codes = list.body.map((i: { code: string }) => i.code);
+    expect(codes).toContain('APIA');
+    expect(codes).toContain('APIM');
+    const uat = list.body.find((i: { code: string }) => i.code === 'APIH');
+    expect(uat.environment).toBe('uat');
     const file = await as(h.app, 'ed')('get', '/api/instances/APIA/file').expect(200);
     expect(file.body.content).toBe(CLEAN);
     await rm(h.dir, { recursive: true, force: true });
@@ -135,15 +142,41 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('verifies drift read-only against a live file', async () => {
+  it('verifies drift read-only by fetching the live file', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
-    const same = await ed('post', '/api/instances/APIA/verify').send({ liveContent: CLEAN }).expect(200);
+    const same = await ed('post', '/api/instances/APIA/verify').send({}).expect(200);
     expect(same.body.inSync).toBe(true);
-    const drifted = await ed('post', '/api/instances/APIA/verify')
-      .send({ liveContent: '9012=1=1 :: compositeExchangeCode=JP\n' }).expect(200);
+
+    h.reader.set('APIA', FILE, '9012=1=1 :: compositeExchangeCode=JP\n');
+    const drifted = await ed('post', '/api/instances/APIA/verify').send({}).expect(200);
     expect(drifted.body.inSync).toBe(false);
-    expect(drifted.body.recordedSha).not.toBe(drifted.body.liveSha);
+    // verify does not ingest — recorded version is unchanged
+    const file = await ed('get', '/api/instances/APIA/file').expect(200);
+    expect(file.body.content).toBe(CLEAN);
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('pulls the live version only when it differs, then is a no-op', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    // identical live content -> no update
+    const noop = await ed('post', '/api/instances/APIA/sync').send({}).expect(200);
+    expect(noop.body.updated).toBe(false);
+
+    // live drifts -> sync ingests it as a new commit on the instance branch
+    h.reader.set('APIA', FILE, '9012=1=1 :: compositeExchangeCode=JP\n');
+    const pulled = await ed('post', '/api/instances/APIA/sync').send({}).expect(200);
+    expect(pulled.body.updated).toBe(true);
+    const file = await ed('get', '/api/instances/APIA/file').expect(200);
+    expect(file.body.content).toContain('JP');
+
+    // second sync is a no-op again (now in sync)
+    const again = await ed('post', '/api/instances/APIA/sync').send({}).expect(200);
+    expect(again.body.updated).toBe(false);
+
+    // unreachable instance reports 502
+    await ed('post', '/api/instances/APIB/sync').send({}).expect(502);
     await rm(h.dir, { recursive: true, force: true });
   });
 

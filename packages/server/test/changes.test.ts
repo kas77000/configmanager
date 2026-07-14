@@ -18,8 +18,8 @@ describe('ChangeStore', () => {
     expect(c.id).toBe('C1');
     expect(c.status).toBe('draft');
     expect(c.targets).toEqual([
-      { instance: 'APIA', branch: 'change/C1/APIA' },
-      { instance: 'APIB', branch: 'change/C1/APIB' },
+      { instance: 'APIA', file: 'ai.fixmsg.properties', branch: 'change/C1/APIA' },
+      { instance: 'APIB', file: 'ai.fixmsg.properties', branch: 'change/C1/APIB' },
     ]);
   });
 

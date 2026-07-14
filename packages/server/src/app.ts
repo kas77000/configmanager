@@ -6,13 +6,18 @@ import type { Change, ChangeStore } from './store/changes';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
 import { checkDrift } from './verify';
-import { INSTANCES, changeBranch, instanceBranch, isInstance } from './config';
+import type { InstanceReader } from './instance-reader';
+import { MANAGED_FILE, instanceBranch, instanceInfos, isInstance } from './config';
+
+/** Author recorded for content pulled in from a live instance. */
+const SERVICE_ACCOUNT = { name: 'Service Account', email: 'service-account@local' };
 
 export interface AppDeps {
   repo: ConfigRepo;
   users: UserDirectory;
   audit: AuditLog;
   changes: ChangeStore;
+  reader: InstanceReader;
   identity: { header: string; devUser?: string };
 }
 
@@ -29,7 +34,7 @@ function targetBranch(change: Change, instance: string): string | null {
 }
 
 export function createApp(deps: AppDeps): Express {
-  const { repo, users, audit, changes } = deps;
+  const { repo, users, audit, changes, reader } = deps;
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
@@ -68,7 +73,7 @@ export function createApp(deps: AppDeps): Express {
 
   // --- Instances (per-instance canonical versions) -------------------------
   api.get('/instances', wrap(async (_req, res) => {
-    res.json(INSTANCES);
+    res.json(instanceInfos());
   }));
 
   api.get('/instances/:code/file', wrap(async (req, res) => {
@@ -76,12 +81,12 @@ export function createApp(deps: AppDeps): Express {
     res.json({ instance: req.params.code, content: await repo.readFile(instanceBranch(req.params.code)) });
   }));
 
-  // Read-only drift check: caller supplies the live file content; the app never pushes.
+  // Read-only dry-run: fetch the live file via the service account and compare (no ingest).
   api.post('/instances/:code/verify', wrap(async (req, res) => {
     const code = req.params.code;
     if (!isInstance(code)) { res.status(404).json({ error: 'unknown instance' }); return; }
-    const live = req.body?.liveContent;
-    if (typeof live !== 'string') { res.status(400).json({ error: 'liveContent (string) required' }); return; }
+    const live = await reader.read(code, MANAGED_FILE);
+    if (live === null) { res.status(502).json({ error: 'instance unreachable' }); return; }
     const recorded = await repo.readFile(instanceBranch(code));
     const result = checkDrift(code, recorded, live);
     await audit.append({
@@ -92,6 +97,38 @@ export function createApp(deps: AppDeps): Express {
       details: { inSync: result.inSync },
     });
     res.json(result);
+  }));
+
+  // Pull-if-different: fetch live; if it differs from the recorded version, ingest it as a
+  // new commit on the instance branch. If identical, do nothing. Never writes to the instance.
+  api.post('/instances/:code/sync', wrap(async (req, res) => {
+    const user = requireUser(req);
+    if (denyPending(req, res)) return;
+    const code = req.params.code;
+    if (!isInstance(code)) { res.status(404).json({ error: 'unknown instance' }); return; }
+    const live = await reader.read(code, MANAGED_FILE);
+    if (live === null) { res.status(502).json({ error: 'instance unreachable' }); return; }
+    const recorded = await repo.readFile(instanceBranch(code));
+    const drift = checkDrift(code, recorded, live);
+    if (drift.inSync) {
+      res.json({ updated: false, ...drift });
+      return;
+    }
+    const commit = await repo.writeCommit(
+      instanceBranch(code),
+      live,
+      SERVICE_ACCOUNT,
+      `sync: import live ${MANAGED_FILE} from ${code}`,
+    );
+    await audit.append({
+      windowsId: user.windowsId,
+      ip: req.ip,
+      action: 'sync-import',
+      branch: instanceBranch(code),
+      commit,
+      details: { recordedSha: drift.recordedSha, liveSha: drift.liveSha },
+    });
+    res.json({ updated: true, commit, ...drift });
   }));
 
   // --- Changes (a methodology fanned out across instances) -----------------

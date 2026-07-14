@@ -8,6 +8,7 @@ import { JsonStore } from './store/json-store';
 import { UserDirectory, type User } from './store/users';
 import { AuditLog, type AuditEvent } from './store/audit';
 import { ChangeStore, type Change } from './store/changes';
+import { StaticInstanceReader } from './instance-reader';
 import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig } from './config';
 
 export async function main(): Promise<void> {
@@ -21,11 +22,15 @@ export async function main(): Promise<void> {
   const audit = new AuditLog(new JsonStore<AuditEvent[]>(join(cfg.dataDir, 'audit.json'), []));
   const changes = new ChangeStore(new JsonStore<Change[]>(join(cfg.dataDir, 'changes.json'), []));
 
+  // Phase 1: no live connectivity configured yet — real service-account reader plugs in here.
+  const reader = new StaticInstanceReader();
+
   const app = createApp({
     repo,
     users,
     audit,
     changes,
+    reader,
     identity: { header: IDENTITY_HEADER, devUser: process.env[DEV_USER_ENV] },
   });
 
