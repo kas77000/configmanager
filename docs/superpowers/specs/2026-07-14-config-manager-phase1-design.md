@@ -43,13 +43,38 @@ Because that full vision spans six largely independent subsystems, it is being b
 Explicitly **out of scope for Phase 1** (deferred to Phase 2):
 - Email / approval workflow
 - Jira ticket creation
-- Deploy / copy to the live APIA–APIM servers
-- Multi-file management (Phase 1 works only on `ai.fixmsg.properties`)
+- Pushing/deploying to the live APIA–APIM servers — **removed as a feature.** The app
+  verifies drift read-only (compares live vs recorded) but never writes to instances.
+- Multi-file management (Phase 1 works only on `ai.fixmsg.properties`, one version per instance)
 
 The bar for Phase 1: editing the file must be **efficient and correct when several people
 use it concurrently.**
 
 ---
+
+## 2a. Revision 2026-07-14 — per-instance model (supersedes the single-`main` decisions below)
+
+Two clarifications reshaped the version model after the initial design:
+
+1. **Per-instance versioning.** There is **no single global `main`.** Each instance
+   **APIA … APIM** has its own canonical version of `ai.fixmsg.properties` and its own
+   history — modeled as one long-lived git branch per instance (`instance/APIA`, …). The
+   files legitimately differ per instance (e.g. rules keyed on `algoEnv=APIH^APIA…`).
+
+2. **A change fans out across instances.** A *change* captures one methodology (a
+   description) plus a set of target instances. For **each** target instance it holds its
+   **own working branch and its own edit** (`change/<id>/<INSTANCE>`), because applying the
+   same intent to different instance files produces different concrete diffs. Rule-engine
+   analysis therefore runs **per instance version**.
+
+3. **Verify, don't deploy.** The app is a history store **plus a read-only drift verifier**:
+   on request it compares the *live* instance file against the version it recorded and flags
+   drift. It does **not** push/deploy to servers (that coupling is removed). Copying changes
+   onto instances stays a manual/out-of-app step in Phase 1.
+
+Everywhere below that says "the canonical `main` copy" now means "the targeted instance's
+branch"; "merge to `main`" means "merge the change's per-instance branch into that instance's
+branch." The merge gate, audit log, identity, and rule engine are unchanged.
 
 ## 3. Key Decisions (agreed)
 

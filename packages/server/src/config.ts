@@ -3,8 +3,27 @@ import { join } from 'node:path';
 /** The single config file managed in Phase 1. */
 export const MANAGED_FILE = 'ai.fixmsg.properties';
 
-/** The canonical production branch inside the managed repo. */
-export const MAIN_BRANCH = 'main';
+/** The trading instances, each with its own canonical version of the file. */
+export const INSTANCES = [
+  'APIA', 'APIB', 'APIC', 'APID', 'APIE', 'APIF', 'APIG',
+  'APIH', 'APII', 'APIJ', 'APIK', 'APIL', 'APIM',
+] as const;
+
+export type Instance = (typeof INSTANCES)[number];
+
+export function isInstance(code: string): code is Instance {
+  return (INSTANCES as readonly string[]).includes(code);
+}
+
+/** The long-lived branch holding an instance's canonical version. */
+export function instanceBranch(code: string): string {
+  return `instance/${code}`;
+}
+
+/** The working branch for one instance within a change. */
+export function changeBranch(changeId: string, code: string): string {
+  return `change/${changeId}/${code}`;
+}
 
 /** HTTP header the reverse proxy sets with the authenticated Windows identity. */
 export const IDENTITY_HEADER = 'x-remote-user';

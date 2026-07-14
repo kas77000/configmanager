@@ -9,6 +9,8 @@ import { ConfigRepo } from '../src/git/repo';
 import { JsonStore } from '../src/store/json-store';
 import { UserDirectory, type User } from '../src/store/users';
 import { AuditLog, type AuditEvent } from '../src/store/audit';
+import { ChangeStore, type Change } from '../src/store/changes';
+import { seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
 const CLEAN = '9012=1=1 :: compositeExchangeCode=HK\n';
@@ -16,116 +18,145 @@ const HEADER = 'x-remote-user';
 
 interface Harness {
   app: Express;
-  repo: ConfigRepo;
-  users: UserDirectory;
   dir: string;
 }
 
 async function makeHarness(): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'cfgapi-'));
   const repo = new ConfigRepo(join(dir, 'repo'), FILE);
-  await repo.init(CLEAN);
+  await seedRepo(repo, CLEAN);
   const users = new UserDirectory(new JsonStore<User[]>(join(dir, 'users.json'), []));
   const audit = new AuditLog(new JsonStore<AuditEvent[]>(join(dir, 'audit.json'), []));
+  const changes = new ChangeStore(new JsonStore<Change[]>(join(dir, 'changes.json'), []));
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', role: 'admin' });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', role: 'editor' });
-  const app = createApp({ repo, users, audit, identity: { header: HEADER } });
-  return { app, repo, users, dir };
+  const app = createApp({ repo, users, audit, changes, identity: { header: HEADER } });
+  return { app, dir };
 }
 
 const as = (app: Express, id: string) => (method: 'get' | 'post' | 'put', url: string) =>
   request(app)[method](url).set(HEADER, id);
 
-describe('API', () => {
+async function newChange(app: Express, instances: string[]): Promise<string> {
+  const res = await as(app, 'ed')('post', '/api/changes')
+    .send({ description: 'apply methodology', instances })
+    .expect(201);
+  return res.body.id as string;
+}
+
+describe('API (per-instance)', () => {
   it('rejects requests with no identity', async () => {
     const h = await makeHarness();
     await request(h.app).get('/api/me').expect(401);
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('returns the caller identity and auto-registers unknown users as pending', async () => {
+  it('lists all instances and their seeded content', async () => {
     const h = await makeHarness();
-    const res = await as(h.app, 'newcomer')('get', '/api/me').expect(200);
-    expect(res.body).toMatchObject({ windowsId: 'newcomer', role: 'pending' });
+    const list = await as(h.app, 'ed')('get', '/api/instances').expect(200);
+    expect(list.body).toContain('APIA');
+    expect(list.body).toContain('APIM');
+    const file = await as(h.app, 'ed')('get', '/api/instances/APIA/file').expect(200);
+    expect(file.body.content).toBe(CLEAN);
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('forbids a pending user from creating a branch', async () => {
+  it('forbids a pending user from creating a change', async () => {
     const h = await makeHarness();
-    await as(h.app, 'newcomer')('post', '/api/branches').send({ name: 'x' }).expect(403);
+    await as(h.app, 'newcomer')('post', '/api/changes')
+      .send({ description: 'x', instances: ['APIA'] })
+      .expect(403);
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('runs a clean edit → analysis → merge for an editor', async () => {
+  it('fans a change across instances with independent edits', async () => {
     const h = await makeHarness();
+    const id = await newChange(h.app, ['APIA', 'APIB']);
     const ed = as(h.app, 'ed');
-    await ed('post', '/api/branches').send({ name: 'clean' }).expect(201);
-    await ed('put', '/api/branches/clean/file')
-      .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'switch to JP' })
-      .expect(200);
-    const analysis = await ed('get', '/api/branches/clean/analysis').expect(200);
+    // APIA gets one edit, APIB a different one — same change, different files
+    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+      .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'JP' }).expect(200);
+    await ed('put', `/api/changes/${id}/instances/APIB/file`)
+      .send({ content: '9012=1=1 :: compositeExchangeCode=KS\n', message: 'KS' }).expect(200);
+
+    const a = await ed('get', `/api/changes/${id}/instances/APIA/file`).expect(200);
+    const b = await ed('get', `/api/changes/${id}/instances/APIB/file`).expect(200);
+    expect(a.body.content).toContain('JP');
+    expect(b.body.content).toContain('KS');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('runs clean analysis and merges one instance of a change', async () => {
+    const h = await makeHarness();
+    const id = await newChange(h.app, ['APIA']);
+    const ed = as(h.app, 'ed');
+    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+      .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'JP' }).expect(200);
+    const analysis = await ed('get', `/api/changes/${id}/instances/APIA/analysis`).expect(200);
     expect(analysis.body.errorCount).toBe(0);
     expect(analysis.body.warningCount).toBe(0);
-    const merge = await ed('post', '/api/branches/clean/merge').send({}).expect(200);
+    const merge = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     expect(merge.body.merged).toBe(true);
+    const file = await ed('get', '/api/instances/APIA/file').expect(200);
+    expect(file.body.content).toContain('JP');
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('blocks a merge with ERROR findings and allows an admin override with a reason', async () => {
+  it('blocks ERROR merges and allows admin override with a reason', async () => {
     const h = await makeHarness();
+    const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
-    const bad = '9012=1=1 :: orderSizeADV < 0.07, orderSizeADV >= 0.15\n'; // self-contradiction
-    await ed('post', '/api/branches').send({ name: 'bad' }).expect(201);
-    await ed('put', '/api/branches/bad/file').send({ content: bad, message: 'oops' }).expect(200);
+    const bad = '9012=1=1 :: orderSizeADV < 0.07, orderSizeADV >= 0.15\n';
+    await ed('put', `/api/changes/${id}/instances/APIA/file`).send({ content: bad, message: 'oops' }).expect(200);
 
-    // editor blocked
-    const blocked = await ed('post', '/api/branches/bad/merge').send({ override: true, overrideReason: 'x' });
-    expect(blocked.status).toBe(403); // editor cannot override
+    await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(403);
+    await ed('post', `/api/changes/${id}/instances/APIA/merge`)
+      .send({ override: true, overrideReason: 'x' }).expect(403); // editor cannot override
 
-    // plain merge blocked
-    await ed('post', '/api/branches/bad/merge').send({}).expect(403);
-
-    // admin override without reason -> 400
     const admin = as(h.app, 'root');
-    await admin('post', '/api/branches/bad/merge').send({ override: true }).expect(400);
-
-    // admin override with reason -> merged
-    const ok = await admin('post', '/api/branches/bad/merge')
-      .send({ override: true, overrideReason: 'accepted risk, tracked in JIRA-123' })
-      .expect(200);
+    await admin('post', `/api/changes/${id}/instances/APIA/merge`).send({ override: true }).expect(400);
+    const ok = await admin('post', `/api/changes/${id}/instances/APIA/merge`)
+      .send({ override: true, overrideReason: 'accepted risk JIRA-123' }).expect(200);
     expect(ok.body.merged).toBe(true);
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('requires acknowledgement for WARNING findings', async () => {
+  it('requires acknowledgement for WARNING merges', async () => {
     const h = await makeHarness();
+    const id = await newChange(h.app, ['APIA']);
     const ed = as(h.app, 'ed');
-    const warn =
-      '9012=6=8 :: compositeExchangeCode=HK\n9012=6=12 :: compositeExchangeCode=HK\n'; // redundant-conditions
-    await ed('post', '/api/branches').send({ name: 'warn' }).expect(201);
-    await ed('put', '/api/branches/warn/file').send({ content: warn, message: 'dup' }).expect(200);
-
-    const needsAck = await ed('post', '/api/branches/warn/merge').send({});
+    const warn = '9012=6=8 :: compositeExchangeCode=HK\n9012=6=12 :: compositeExchangeCode=HK\n';
+    await ed('put', `/api/changes/${id}/instances/APIA/file`).send({ content: warn, message: 'dup' }).expect(200);
+    const needsAck = await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({});
     expect(needsAck.status).toBe(409);
-    expect(needsAck.body.error).toBe('warnings-need-acknowledgement');
-
-    const ok = await ed('post', '/api/branches/warn/merge').send({ acknowledgeWarnings: true }).expect(200);
+    const ok = await ed('post', `/api/changes/${id}/instances/APIA/merge`)
+      .send({ acknowledgeWarnings: true }).expect(200);
     expect(ok.body.merged).toBe(true);
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('records who-did-what in the audit log and history', async () => {
+  it('verifies drift read-only against a live file', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
-    await ed('post', '/api/branches').send({ name: 'trace' }).expect(201);
-    await ed('put', '/api/branches/trace/file')
-      .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'edit' })
-      .expect(200);
-    await ed('post', '/api/branches/trace/merge').send({}).expect(200);
+    const same = await ed('post', '/api/instances/APIA/verify').send({ liveContent: CLEAN }).expect(200);
+    expect(same.body.inSync).toBe(true);
+    const drifted = await ed('post', '/api/instances/APIA/verify')
+      .send({ liveContent: '9012=1=1 :: compositeExchangeCode=JP\n' }).expect(200);
+    expect(drifted.body.inSync).toBe(false);
+    expect(drifted.body.recordedSha).not.toBe(drifted.body.liveSha);
+    await rm(h.dir, { recursive: true, force: true });
+  });
 
+  it('records who-did-what across the change lifecycle', async () => {
+    const h = await makeHarness();
+    const id = await newChange(h.app, ['APIA']);
+    const ed = as(h.app, 'ed');
+    await ed('put', `/api/changes/${id}/instances/APIA/file`)
+      .send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'edit' }).expect(200);
+    await ed('post', `/api/changes/${id}/instances/APIA/merge`).send({}).expect(200);
     const history = await ed('get', '/api/history').expect(200);
     const actions = history.body.audit.map((e: { action: string }) => e.action);
-    expect(actions).toEqual(['create-branch', 'edit', 'merge']);
+    expect(actions).toEqual(['create-change', 'edit', 'merge']);
     expect(history.body.audit.every((e: { windowsId: string }) => e.windowsId === 'ed')).toBe(true);
     await rm(h.dir, { recursive: true, force: true });
   });

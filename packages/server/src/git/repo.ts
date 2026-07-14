@@ -48,19 +48,24 @@ export class ConfigRepo {
     return run;
   }
 
-  /** Creates the repo (if absent) and seeds `file` with `seedContent` on the main branch. */
-  async init(seedContent: string): Promise<void> {
+  /**
+   * Creates the repo if absent, seeding `file` with `seedContent` on `initialBranch`.
+   * Returns true if it created the repo, false if it already existed (so callers can
+   * seed additional branches only once).
+   */
+  async init(seedContent: string, initialBranch: string = this.mainBranch): Promise<boolean> {
     await mkdir(this.dir, { recursive: true });
     const inside = await runGit(this.dir, ['rev-parse', '--is-inside-work-tree']);
-    if (inside.code === 0) return;
+    if (inside.code === 0) return false;
 
-    await git(this.dir, ['init', '-b', this.mainBranch]);
+    await git(this.dir, ['init', '-b', initialBranch]);
     await git(this.dir, ['config', 'user.name', 'Configuration Manager']);
     await git(this.dir, ['config', 'user.email', 'config-manager@local']);
     await git(this.dir, ['config', 'core.autocrlf', 'false']);
     await writeFile(join(this.dir, this.file), seedContent);
     await git(this.dir, ['add', this.file]);
     await git(this.dir, ['commit', '-m', `seed: initial import of ${this.file}`]);
+    return true;
   }
 
   async listBranches(): Promise<string[]> {
