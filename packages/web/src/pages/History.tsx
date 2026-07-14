@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, type AuditEvent, type Commit, type InstanceInfo } from '../api';
 import { Skeleton, relTime } from '../components';
+import { IconChevron } from '../icons';
 
 type Range = 'all' | '24h' | '7d' | '30d';
 const RANGE_MS: Record<Range, number> = { all: Infinity, '24h': 864e5, '7d': 7 * 864e5, '30d': 30 * 864e5 };
@@ -67,16 +68,8 @@ export default function History() {
       {!data ? (
         <div className="panel"><Skeleton rows={6} /></div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: '1.35fr 1fr', gap: 16, alignItems: 'start' }}>
-          <section style={{ minWidth: 0 }}>
-            <div className="group-title"><h2>Commit graph</h2><span className="count-chip">{commits.length}</span></div>
-            <div className="panel" style={{ overflowX: 'auto' }}>
-              {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : <CommitGraph commits={commits} />}
-            </div>
-          </section>
-
-          <section style={{ minWidth: 0 }}>
-            <div className="group-title"><h2>Activity</h2><span className="count-chip">{audit.length}</span></div>
+        <div className="stack" style={{ gap: 16 }}>
+          <Collapsible title="Activity" count={audit.length} defaultOpen>
             <div className="panel">
               {audit.length === 0 ? <div className="empty">No activity in this filter.</div> : (
                 <div className="stack">
@@ -94,10 +87,30 @@ export default function History() {
                 </div>
               )}
             </div>
-          </section>
+          </Collapsible>
+
+          <Collapsible title="Commit graph" count={commits.length} defaultOpen>
+            <div className="panel" style={{ overflowX: 'auto' }}>
+              {commits.length === 0 ? <div className="empty">No commits in this filter.</div> : <CommitGraph commits={commits} />}
+            </div>
+          </Collapsible>
         </div>
       )}
     </div>
+  );
+}
+
+function Collapsible({ title, count, defaultOpen, children }: { title: string; count: number; defaultOpen?: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  return (
+    <section style={{ minWidth: 0 }}>
+      <div className="group-title rowlink" style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => setOpen((o) => !o)}>
+        <IconChevron style={{ width: 16, height: 16, color: 'var(--faint)', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ease)' }} />
+        <h2>{title}</h2>
+        <span className="count-chip">{count}</span>
+      </div>
+      {open && children}
+    </section>
   );
 }
 
@@ -193,7 +206,7 @@ function parseRefs(refs: string): Ref[] {
 }
 
 function RefList({ refs, color }: { refs: Ref[]; color: string }) {
-  const MAX = 3;
+  const MAX = 1;
   const shown = refs.slice(0, MAX);
   const extra = refs.slice(MAX);
   return (
