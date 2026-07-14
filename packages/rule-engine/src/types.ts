@@ -46,3 +46,16 @@ export interface ParsedFile {
   /** All rules in file order, including directive/unparseable/disabled entries. */
   rules: Rule[];
 }
+
+/** A problem detected by the analysis engine. */
+export interface Finding {
+  severity: Severity;
+  /** Stable machine code, e.g. "unknown-field", "dead-rule". */
+  code: string;
+  /** Human-readable explanation. */
+  message: string;
+  /** 1-based line of the primary rule the finding is about. */
+  lineNumber: number;
+  /** Other lines involved (e.g. the rule that shadows this one). */
+  relatedLineNumbers?: number[];
+}
