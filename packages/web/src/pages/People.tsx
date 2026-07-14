@@ -118,11 +118,13 @@ function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: strin
     setRoles((s) => (s.includes(r) ? s.filter((x) => x !== r) : [...s, r]));
   }
 
+  const valid = windowsId.trim().length > 0 && displayName.trim().length > 0 && email.trim().length > 0;
+
   async function submit() {
-    if (!windowsId.trim()) return onError('Windows ID required.');
+    if (!valid) return;
     setBusy(true);
     try {
-      await api.createUser({ windowsId: windowsId.trim(), displayName: displayName.trim() || undefined, email: email.trim() || undefined, roles });
+      await api.createUser({ windowsId: windowsId.trim(), displayName: displayName.trim(), email: email.trim(), roles });
       setWindowsId(''); setDisplayName(''); setEmail(''); setRoles(['editor']);
       onDone();
     } catch (e) { onError(e instanceof Error ? e.message : 'failed'); } finally { setBusy(false); }
@@ -132,8 +134,8 @@ function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: strin
     <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 12 }}>
         <label className="field" style={{ margin: 0 }}><span>Windows ID</span><input className="input" value={windowsId} onChange={(e) => setWindowsId(e.target.value)} placeholder="salavat" spellCheck={false} /></label>
-        <label className="field" style={{ margin: 0 }}><span>Name</span><input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="optional" /></label>
-        <label className="field" style={{ margin: 0 }}><span>Email</span><input className="input" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="optional" /></label>
+        <label className="field" style={{ margin: 0 }}><span>Name</span><input className="input" value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Salavat Example" /></label>
+        <label className="field" style={{ margin: 0 }}><span>Email</span><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="salavat@firm.com" /></label>
       </div>
       <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
@@ -143,7 +145,10 @@ function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: strin
           ))}
           <span className="faint" style={{ fontSize: 12 }}>{roleSummary(roles)}</span>
         </div>
-        <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? <span className="spinner" /> : <IconPlus />}Add person</button>
+        <div className="hstack">
+          {!valid && <span className="faint" style={{ fontSize: 12 }}>Windows ID, name, and email are required.</span>}
+          <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Add person</button>
+        </div>
       </div>
     </div>
   );

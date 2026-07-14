@@ -110,48 +110,65 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
     } catch (e) { setErr(e instanceof Error ? e.message : 'Could not create the change.'); setBusy(false); }
   }
 
-  const label = { display: 'block', fontSize: 12, color: 'var(--text)', fontWeight: 600, marginBottom: 8 } as const;
+  const label = { display: 'block', fontSize: 13, color: 'var(--text)', fontWeight: 600, marginBottom: 8 } as const;
+  const sub = { display: 'block', fontSize: 12, color: 'var(--muted)', fontWeight: 500, marginBottom: 6 } as const;
   const sel = { borderColor: 'var(--accent)', color: 'var(--accent)' };
 
   return (
     <div className="panel" style={{ padding: 24, marginBottom: 24 }}>
-      <div className="stack" style={{ gap: 22 }}>
-        <label style={{ display: 'block' }}>
+      <div className="stack" style={{ gap: 24 }}>
+        <label style={{ display: 'block', maxWidth: 560 }}>
           <span style={label}>Change title</span>
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout — restrict Post layering" />
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout: restrict Post layering" />
+          <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>A short name for the whole change. Each file gets its own description below.</span>
         </label>
 
         <div>
-          <div style={label}>Modifications</div>
-          <div className="stack" style={{ gap: 12 }}>
-            {items.map((it, idx) => (
-              <div key={idx} className="panel" style={{ padding: 14, background: 'var(--raised)' }}>
-                <div className="hstack" style={{ gap: 8, marginBottom: 10, alignItems: 'flex-start' }}>
-                  <select className="input mono" style={{ height: 30, width: 220 }} value={it.file} onChange={(e) => setFile(idx, e.target.value)}>
-                    <option value="">select a config file…</option>
+          <div className="row-between" style={{ marginBottom: 14 }}>
+            <span style={label}>Modifications<span className="faint" style={{ fontWeight: 400 }}> · {items.length}</span></span>
+          </div>
+
+          {items.map((it, idx) => (
+            <div key={idx} style={{ paddingTop: idx === 0 ? 0 : 18, marginTop: idx === 0 ? 0 : 18, borderTop: idx === 0 ? undefined : '1px solid var(--border)' }}>
+              <div className="row-between" style={{ marginBottom: 12 }}>
+                <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Modification {idx + 1}</span>
+                {items.length > 1 && <button className="btn btn-sm btn-ghost" onClick={() => setItems((a) => a.filter((_, i) => i !== idx))}><IconX style={{ width: 13, height: 13 }} />Remove</button>}
+              </div>
+
+              <div className="hstack" style={{ gap: 14, alignItems: 'flex-start', flexWrap: 'wrap', marginBottom: 14 }}>
+                <label style={{ flex: '0 0 240px' }}>
+                  <span style={sub}>Config file</span>
+                  <select className="input mono" value={it.file} onChange={(e) => setFile(idx, e.target.value)}>
+                    <option value="">Select a file</option>
                     {allFiles.map((f) => <option key={f} value={f}>{f}</option>)}
                   </select>
-                  <input className="input" style={{ height: 30, flex: 1 }} placeholder="what this file change does" value={it.description} onChange={(e) => setItem(idx, { description: e.target.value })} />
-                  {items.length > 1 && <button className="btn btn-sm btn-ghost" title="Remove modification" onClick={() => setItems((a) => a.filter((_, i) => i !== idx))}><IconX style={{ width: 14, height: 14 }} /></button>}
-                </div>
-                {it.file ? (
-                  <div>
-                    <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
-                      Instances{it.instances.length > 0 ? ` · ${it.instances.length} selected` : ''}
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                      {eligible(it.file).map((i) => (
-                        <button key={i.code} type="button" className="btn btn-sm" style={it.instances.includes(i.code) ? sel : undefined} onClick={() => toggleInst(idx, i.code)}>
-                          {i.code}{i.uat ? ' · UAT' : ''}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ) : <div className="faint" style={{ fontSize: 12 }}>Pick a file to choose which instances it applies to.</div>}
+                </label>
+                <label style={{ flex: 1, minWidth: 260 }}>
+                  <span style={sub}>Description</span>
+                  <input className="input" placeholder="What this change does to the file" value={it.description} onChange={(e) => setItem(idx, { description: e.target.value })} />
+                </label>
               </div>
-            ))}
-          </div>
-          <button className="btn btn-sm btn-ghost" style={{ marginTop: 10 }} onClick={() => setItems((a) => [...a, { file: '', description: '', instances: [] }])}><IconPlus style={{ width: 13, height: 13 }} />Add modification</button>
+
+              <div>
+                <span style={sub}>Applies to instances{it.instances.length > 0 && <span className="faint" style={{ fontWeight: 400 }}> · {it.instances.length} selected</span>}</span>
+                {!it.file ? (
+                  <div className="faint" style={{ fontSize: 12 }}>Select a file first; only instances that manage it can be chosen.</div>
+                ) : eligible(it.file).length === 0 ? (
+                  <div className="faint" style={{ fontSize: 12 }}>No instance manages this file yet.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {eligible(it.file).map((i) => (
+                      <button key={i.code} type="button" className="btn btn-sm" style={it.instances.includes(i.code) ? sel : undefined} onClick={() => toggleInst(idx, i.code)}>
+                        {i.code}{i.uat ? ' · UAT' : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          <button className="btn btn-sm btn-ghost" style={{ marginTop: 16 }} onClick={() => setItems((a) => [...a, { file: '', description: '', instances: [] }])}><IconPlus style={{ width: 13, height: 13 }} />Add modification</button>
         </div>
 
         {err && <Banner kind="error">{err}</Banner>}
@@ -159,7 +176,7 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
         <div className="hstack" style={{ gap: 10, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
           <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Create change</button>
           <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Give the change a title, and each modification a file, description, and at least one instance.</span>}
+          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Give the change a title, and each modification a file, a description, and at least one instance.</span>}
         </div>
       </div>
     </div>
