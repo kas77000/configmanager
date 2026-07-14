@@ -36,6 +36,21 @@ export default function ChangeDetail({ me }: { me: User | null }) {
 
       <ApprovalBar change={change} me={me} onChange={reload} />
 
+      <div className="panel" style={{ marginBottom: 16 }}>
+        <table className="list">
+          <thead><tr><th>Description</th><th style={{ width: 220 }}>Config file</th><th style={{ width: 240 }}>Applies to instances</th></tr></thead>
+          <tbody>
+            {change.items.map((it, i) => (
+              <tr key={i}>
+                <td>{it.description}</td>
+                <td className="mono">{it.file}</td>
+                <td className="mono faint" style={{ fontSize: 12 }}>{it.instances.join(', ')}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
       {!canSeeConfig ? (
         <div className="panel"><div className="empty">You can review and decide on this request, but the config editing is handled by the quant team.</div></div>
       ) : (

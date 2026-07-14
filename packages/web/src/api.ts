@@ -33,11 +33,12 @@ export interface InstanceInfo {
 export interface Settings { quantDistributionEmail: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
+export interface ChangeItem { file: string; description: string; instances: string[]; }
 export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
 export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
 export interface JiraTicket { file: string; key: string; url: string; }
 export interface Change {
-  id: string; description: string; createdBy: string; createdAt: string;
+  id: string; description: string; items: ChangeItem[]; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
   submittedBy?: string; submittedAt?: string; jiraTickets?: JiraTicket[]; decision?: ChangeDecision;
 }
@@ -126,7 +127,7 @@ export const api = {
   deleteUser: (id: string) => req<{ deleted: boolean }>('DELETE', `/users/${id}`),
 
   changes: () => req<Change[]>('GET', '/changes'),
-  createChange: (description: string, instances: string[], files: string[]) => req<Change>('POST', '/changes', { description, instances, files }),
+  createChange: (description: string, items: ChangeItem[]) => req<Change>('POST', '/changes', { description, items }),
   change: (id: string) => req<Change>('GET', `/changes/${id}`),
   cancelChange: (id: string) => req<Change>('POST', `/changes/${id}/cancel`, {}),
   submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),

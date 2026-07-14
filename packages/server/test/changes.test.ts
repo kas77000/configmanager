@@ -12,20 +12,26 @@ async function store(): Promise<ChangeStore> {
 }
 
 describe('ChangeStore', () => {
-  it('creates a change with one branch per target instance and a files list', async () => {
+  it('derives per-instance targets from per-file modifications', async () => {
     const changes = await store();
-    const c = await changes.create({ description: 'Korea 144=1', createdBy: 'ed', instances: ['APIA', 'APIB'], files: ['ai.fixmsg.properties', 'risk.properties'] });
+    const c = await changes.create({
+      description: 'Korea 144=1', createdBy: 'ed', items: [
+        { file: 'ai.fixmsg.properties', description: 'add 144=1', instances: ['APIA', 'APIB'] },
+        { file: 'risk.properties', description: 'tighten risk', instances: ['APIA'] },
+      ],
+    });
     expect(c.id).toBe('C1');
     expect(c.status).toBe('draft');
+    // APIA gets both files, APIB only the one whose modification targets it
     expect(c.targets).toEqual([
       { instance: 'APIA', branch: 'change/C1/APIA', files: ['ai.fixmsg.properties', 'risk.properties'] },
-      { instance: 'APIB', branch: 'change/C1/APIB', files: ['ai.fixmsg.properties', 'risk.properties'] },
+      { instance: 'APIB', branch: 'change/C1/APIB', files: ['ai.fixmsg.properties'] },
     ]);
   });
 
   it('flips to merged only once every target is applied', async () => {
     const changes = await store();
-    const c = await changes.create({ description: 'x', createdBy: 'ed', instances: ['APIA', 'APIB'], files: ['ai.fixmsg.properties'] });
+    const c = await changes.create({ description: 'x', createdBy: 'ed', items: [{ file: 'ai.fixmsg.properties', description: 'x', instances: ['APIA', 'APIB'] }] });
     await changes.markMerged(c.id, 'APIA', 'aaa');
     expect((await changes.get(c.id))?.status).toBe('draft');
     await changes.markMerged(c.id, 'APIB', 'bbb');

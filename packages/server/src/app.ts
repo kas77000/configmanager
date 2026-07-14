@@ -2,7 +2,7 @@ import express, { type Express, type RequestHandler } from 'express';
 import type { ConfigRepo } from './git/repo';
 import { ROLES, type Role, type UserDirectory, canApprove, canEdit, isAdmin } from './store/users';
 import type { AuditLog } from './store/audit';
-import type { Change, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
+import type { Change, ChangeItem, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
 import type { JiraClient } from './jira';
 import type { SettingsStore } from './store/settings';
@@ -237,23 +237,38 @@ export function createApp(deps: AppDeps): Express {
   api.post('/changes', wrap(async (req, res) => {
     if (!requireEdit(req, res)) return;
     const description = String(req.body?.description ?? '').trim();
-    const instList: unknown = req.body?.instances;
-    const fileList: unknown = req.body?.files;
-    if (!description) { res.status(400).json({ error: 'description required' }); return; }
-    if (!Array.isArray(instList) || instList.length === 0) { res.status(400).json({ error: 'instances (non-empty array) required' }); return; }
-    const codes = instList.map(String);
-    const files = Array.isArray(fileList) && fileList.length ? fileList.map(String) : [MANAGED_FILE];
+    if (!description) { res.status(400).json({ error: 'a change title (description) is required' }); return; }
 
-    for (const code of codes) {
-      const inst = await instances.get(code);
-      if (!inst) { res.status(400).json({ error: `unknown instance: ${code}` }); return; }
-      const missing = files.filter((f) => !inst.files.includes(f));
-      if (missing.length) { res.status(400).json({ error: `${code} does not manage: ${missing.join(', ')}` }); return; }
+    let items: ChangeItem[];
+    if (Array.isArray(req.body?.items) && req.body.items.length) {
+      items = (req.body.items as unknown[]).map((raw) => {
+        const it = raw as { file?: unknown; description?: unknown; instances?: unknown };
+        return {
+          file: String(it.file ?? ''),
+          description: String(it.description ?? description).trim() || description,
+          instances: Array.isArray(it.instances) ? it.instances.map(String) : [],
+        };
+      });
+    } else {
+      const codes = Array.isArray(req.body?.instances) ? (req.body.instances as unknown[]).map(String) : [];
+      const files = Array.isArray(req.body?.files) && req.body.files.length ? (req.body.files as unknown[]).map(String) : [MANAGED_FILE];
+      if (!codes.length) { res.status(400).json({ error: 'instances (non-empty array) required' }); return; }
+      items = files.map((file) => ({ file, description, instances: codes }));
     }
 
-    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, instances: codes, files });
+    for (const it of items) {
+      if (!it.file) { res.status(400).json({ error: 'each modification needs a file' }); return; }
+      if (!it.instances.length) { res.status(400).json({ error: `the modification for ${it.file} needs at least one instance` }); return; }
+      for (const code of it.instances) {
+        const inst = await instances.get(code);
+        if (!inst) { res.status(400).json({ error: `unknown instance: ${code}` }); return; }
+        if (!inst.files.includes(it.file)) { res.status(400).json({ error: `${code} does not manage ${it.file}` }); return; }
+      }
+    }
+
+    const change = await changes.create({ description, createdBy: requireUser(req).windowsId, items });
     for (const t of change.targets) await repo.createBranch(t.branch, instanceBranch(t.instance));
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: codes, files } });
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'create-change', details: { changeId: change.id, instances: change.targets.map((t) => t.instance) } });
     res.status(201).json(change);
   }));
 

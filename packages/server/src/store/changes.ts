@@ -22,10 +22,19 @@ export interface ChangeDecision {
 
 export interface JiraTicket { file: string; key: string; url: string; }
 
+/** One modification within a change: a config file, its own description, and the instances it applies to. */
+export interface ChangeItem {
+  file: string;
+  description: string;
+  instances: string[];
+}
+
 export interface Change {
   id: string;
-  /** The methodology being applied (free text). */
+  /** Short title for the whole change (shown in lists and the email subject). */
   description: string;
+  /** Per-file modifications, each with its own description and instances. */
+  items: ChangeItem[];
   createdBy: string;
   createdAt: string;
   targets: ChangeTarget[];
@@ -40,8 +49,7 @@ export interface Change {
 export interface NewChange {
   description: string;
   createdBy: string;
-  instances: string[];
-  files: string[];
+  items: ChangeItem[];
 }
 
 /** Groups the per-instance edits that make up one logical change. */
@@ -55,17 +63,20 @@ export class ChangeStore {
     return this.store.update((changes) => {
       const nextN = changes.reduce((max, c) => Math.max(max, Number(c.id.replace(/^C/, '')) || 0), 0) + 1;
       const id = `C${nextN}`;
+      const instanceCodes = [...new Set(input.items.flatMap((it) => it.instances))];
+      const targets: ChangeTarget[] = instanceCodes.map((instance) => ({
+        instance,
+        branch: changeBranch(id, instance),
+        files: [...new Set(input.items.filter((it) => it.instances.includes(instance)).map((it) => it.file))],
+      }));
       const change: Change = {
         id,
         description: input.description,
+        items: input.items,
         createdBy: input.createdBy,
         createdAt: this.now().toISOString(),
         status: 'draft',
-        targets: input.instances.map((instance) => ({
-          instance,
-          branch: changeBranch(id, instance),
-          files: [...input.files],
-        })),
+        targets,
       };
       changes.push(change);
       return change;
