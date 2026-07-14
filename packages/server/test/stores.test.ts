@@ -11,13 +11,16 @@ async function tmp(): Promise<string> {
 }
 
 describe('UserDirectory', () => {
-  it('auto-registers an unknown Windows ID as pending', async () => {
+  it('makes the first user admin, then auto-registers later ones as pending', async () => {
     const dir = await tmp();
     const users = new UserDirectory(new JsonStore<User[]>(join(dir, 'users.json'), []));
-    const u = await users.ensure('salavat');
-    expect(u).toMatchObject({ windowsId: 'salavat', role: 'pending' });
+    const first = await users.ensure('root');
+    expect(first).toMatchObject({ windowsId: 'root', role: 'admin' });
+    const second = await users.ensure('salavat');
+    expect(second).toMatchObject({ windowsId: 'salavat', role: 'pending' });
     // ensure is idempotent
-    expect((await users.list()).length).toBe(1);
+    await users.ensure('salavat');
+    expect((await users.list()).length).toBe(2);
     await rm(dir, { recursive: true, force: true });
   });
 

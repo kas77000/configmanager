@@ -21,12 +21,16 @@ export class UserDirectory {
     return (await this.store.read()).find((u) => u.windowsId === windowsId);
   }
 
-  /** Returns the user for a Windows ID, auto-registering an unknown one as `pending`. */
+  /**
+   * Returns the user for a Windows ID, auto-registering an unknown one. The very first user
+   * to connect becomes `admin` (bootstrap); everyone after that is `pending` until assigned.
+   */
   async ensure(windowsId: string): Promise<User> {
     return this.store.update((users) => {
       let user = users.find((u) => u.windowsId === windowsId);
       if (!user) {
-        user = { windowsId, displayName: windowsId, email: '', role: 'pending' };
+        const role: Role = users.length === 0 ? 'admin' : 'pending';
+        user = { windowsId, displayName: windowsId, email: '', role };
         users.push(user);
       }
       return { ...user };

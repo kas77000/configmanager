@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { git, runGit } from './run-git';
 
@@ -55,8 +55,9 @@ export class ConfigRepo {
    */
   async init(seedContent: string, initialBranch: string = this.mainBranch): Promise<boolean> {
     await mkdir(this.dir, { recursive: true });
-    const inside = await runGit(this.dir, ['rev-parse', '--is-inside-work-tree']);
-    if (inside.code === 0) return false;
+    // Detect OUR repo by its own .git, not `rev-parse` — the managed dir may live inside a
+    // parent worktree (e.g. under the app repo), where rev-parse would report the parent.
+    if (await this.hasOwnGitDir()) return false;
 
     await git(this.dir, ['init', '-b', initialBranch]);
     await git(this.dir, ['config', 'user.name', 'Configuration Manager']);
@@ -66,6 +67,15 @@ export class ConfigRepo {
     await git(this.dir, ['add', this.file]);
     await git(this.dir, ['commit', '-m', `seed: initial import of ${this.file}`]);
     return true;
+  }
+
+  private async hasOwnGitDir(): Promise<boolean> {
+    try {
+      await stat(join(this.dir, '.git'));
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async listBranches(): Promise<string[]> {
