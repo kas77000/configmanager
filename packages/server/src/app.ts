@@ -113,8 +113,9 @@ export function createApp(deps: AppDeps): Express {
   }));
   api.patch('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { quantDistributionEmail?: string } = {};
+    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string } = {};
     if (req.body?.quantDistributionEmail !== undefined) patch.quantDistributionEmail = String(req.body.quantDistributionEmail).trim();
+    if (req.body?.jiraEpicKey !== undefined) patch.jiraEpicKey = String(req.body.jiraEpicKey).trim();
     res.json(await deps.settings.update(patch));
   }));
 
@@ -369,6 +370,7 @@ export function createApp(deps: AppDeps): Express {
 
     // On approval, create one Jira ticket per config file. Jira failures never block approval.
     const files = [...new Set(change.targets.flatMap((t) => t.files))];
+    const epic = (await deps.settings.get()).jiraEpicKey || undefined;
     const tickets: JiraTicket[] = [];
     for (const file of files) {
       const targeted = change.targets.filter((t) => t.files.includes(file)).map((t) => t.instance);
@@ -376,6 +378,7 @@ export function createApp(deps: AppDeps): Express {
         const { key, url } = await jira.createIssue(
           `[Config] ${change.description} — ${file}`,
           `Change ${change.id}\nFile: ${file}\nInstances: ${targeted.join(', ')}\n${deps.appBaseUrl}/changes/${change.id}`,
+          epic,
         );
         tickets.push({ file, key, url });
       } catch { /* keep approval even if Jira is down */ }

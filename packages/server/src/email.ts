@@ -12,13 +12,13 @@ const TABLE = 'border-collapse:collapse;font-family:Segoe UI,Arial,sans-serif;fo
 const TH = 'border:1px solid #c8c8c8;background:#f2f2f2;padding:6px 10px;text-align:left';
 const TD = 'border:1px solid #c8c8c8;padding:6px 10px;vertical-align:top';
 
-function shell(intro: string, table: string, link: string, sender: string): string {
+function shell(intro: string, table: string, link: string, linkText: string, sender: string): string {
   return [
     `<div style="font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1a1a1a">`,
     `<p>Hi Team,</p>`,
     `<p>${esc(intro)}</p>`,
     table,
-    `<p style="margin-top:14px"><a href="${esc(link)}" style="color:#3538cd">Open in Configuration Manager</a></p>`,
+    `<p style="margin-top:14px"><a href="${esc(link)}" style="color:#3538cd;font-weight:600">${esc(linkText)}</a></p>`,
     `<p style="margin-top:16px">Thanks and Regards,<br>${esc(sender)}</p>`,
     `</div>`,
   ].join('\n');
@@ -39,7 +39,7 @@ export function approvalEmail(change: Change, recipients: string[], cc: string[]
     subject: change.effectiveDate
       ? `Config changes request for ${change.effectiveDate}: ${change.description}`
       : `Config change request ${change.id}: ${change.description}`,
-    html: shell(intro, table, link, sender),
+    html: shell(intro, table, link, 'Approve or reject this request in Configuration Manager', sender),
   };
 }
 
@@ -62,7 +62,7 @@ export function recapEmail(change: Change, appBaseUrl: string, sender: string): 
     subject: change.effectiveDate
       ? `${change.description} effective for ${change.effectiveDate} trading`
       : `Config change ${change.id} applied: ${change.description}`,
-    html: shell(intro, table, link, sender),
+    html: shell(intro, table, link, 'View this change in Configuration Manager', sender),
   };
 }
 

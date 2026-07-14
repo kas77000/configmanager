@@ -13,7 +13,7 @@ import { ChangeStore, type Change } from '../src/store/changes';
 import { InstanceStore, type ManagedInstance } from '../src/store/instances';
 import { SettingsStore, defaultSettings, type Settings } from '../src/store/settings';
 import { StaticInstanceReader } from '../src/instance-reader';
-import { StubJiraClient } from '../src/jira';
+import { StubJiraClient, type JiraClient } from '../src/jira';
 import { seedInstances, seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
@@ -26,7 +26,7 @@ interface Harness {
   reader: StaticInstanceReader;
 }
 
-async function makeHarness(): Promise<Harness> {
+async function makeHarness(jira: JiraClient = new StubJiraClient()): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'cfgapi-'));
   const repo = new ConfigRepo(join(dir, 'repo'), FILE);
   await seedRepo(repo, CLEAN);
@@ -40,7 +40,7 @@ async function makeHarness(): Promise<Harness> {
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', roles: ['admin'] });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', roles: ['editor'] });
   const settings = new SettingsStore(new JsonStore<Settings>(join(dir, 'settings.json'), defaultSettings));
-  const app = createApp({ repo, users, audit, changes, instances, reader, jira: new StubJiraClient(), settings, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
+  const app = createApp({ repo, users, audit, changes, instances, reader, jira, settings, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
@@ -268,6 +268,19 @@ describe('API (per-instance)', () => {
     expect(eml.text).toContain('boss@x');
     expect(eml.text).toContain('Newly applies to instances');
     expect(eml.text).toContain('risk.properties');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('creates Jira tickets under the configured epic (default BSGPTALGO-550)', async () => {
+    const epics: (string | undefined)[] = [];
+    const jira: JiraClient = { async createIssue(_s, _d, epic) { epics.push(epic); return { key: 'X-1', url: 'https://j/X-1' }; } };
+    const h = await makeHarness(jira);
+    const ed = as(h.app, 'ed');
+    const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
+    await as(h.app, 'root')('post', `/api/changes/${id}/approve`).expect(200);
+    expect(epics).toEqual(['BSGPTALGO-550']);
     await rm(h.dir, { recursive: true, force: true });
   });
 

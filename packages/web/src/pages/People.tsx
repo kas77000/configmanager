@@ -6,19 +6,23 @@ import { IconPlus, IconTrash } from '../icons';
 export default function People({ me }: { me: User | null }) {
   const [users, setUsers] = useState<User[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [distEmail, setDistEmail] = useState('');
-  const [savedDist, setSavedDist] = useState('');
+  const [dist, setDist] = useState('');
+  const [epic, setEpic] = useState('');
+  const [saved, setSaved] = useState({ dist: '', epic: '' });
 
   async function refresh() { setUsers(await api.users()); }
   useEffect(() => {
     refresh().catch(() => setUsers([]));
-    api.settings().then((s) => { setDistEmail(s.quantDistributionEmail); setSavedDist(s.quantDistributionEmail); }).catch(() => {});
+    api.settings().then((s) => { setDist(s.quantDistributionEmail); setEpic(s.jiraEpicKey); setSaved({ dist: s.quantDistributionEmail, epic: s.jiraEpicKey }); }).catch(() => {});
   }, []);
 
-  async function saveDist() {
+  const settingsDirty = dist.trim() !== saved.dist || epic.trim() !== saved.epic;
+  async function saveSettings() {
     setErr(null);
-    try { const s = await api.updateSettings({ quantDistributionEmail: distEmail.trim() }); setSavedDist(s.quantDistributionEmail); setDistEmail(s.quantDistributionEmail); }
-    catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
+    try {
+      const s = await api.updateSettings({ quantDistributionEmail: dist.trim(), jiraEpicKey: epic.trim() });
+      setDist(s.quantDistributionEmail); setEpic(s.jiraEpicKey); setSaved({ dist: s.quantDistributionEmail, epic: s.jiraEpicKey });
+    } catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
   }
 
   if (me && !isAdmin(me.roles)) {
@@ -43,12 +47,19 @@ export default function People({ me }: { me: User | null }) {
       {err && <div style={{ marginBottom: 12 }}><span className="badge error">{err}</span></div>}
 
       <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
-        <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>Quant distribution email</span>
-          <input className="input" style={{ maxWidth: 360 }} value={distEmail} onChange={(e) => setDistEmail(e.target.value)} placeholder="quant-team@firm.com" />
-          <button className="btn btn-sm" disabled={distEmail.trim() === savedDist} onClick={saveDist}>Save</button>
-          <span className="faint" style={{ fontSize: 12 }}>CC'd on every approval-request email.</span>
-        </label>
+        <div className="stack" style={{ gap: 12 }}>
+          <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>Quant distribution email</span>
+            <input className="input" style={{ maxWidth: 320 }} value={dist} onChange={(e) => setDist(e.target.value)} placeholder="quant-team@firm.com" />
+            <span className="faint" style={{ fontSize: 12 }}>CC'd on every approval-request email.</span>
+          </label>
+          <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>JIRA epic</span>
+            <input className="input mono" style={{ maxWidth: 320 }} value={epic} onChange={(e) => setEpic(e.target.value)} placeholder="BSGPTALGO-550" />
+            <span className="faint" style={{ fontSize: 12 }}>Config-change tickets are created under this epic.</span>
+          </label>
+          <div><button className="btn btn-sm" disabled={!settingsDirty} onClick={saveSettings}>Save settings</button></div>
+        </div>
       </div>
 
       <AddPerson onDone={refresh} onError={setErr} />

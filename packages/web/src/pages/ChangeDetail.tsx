@@ -134,7 +134,7 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
   const [savedVersion, setSavedVersion] = useState(0);
   const [tab, setTab] = useState<'warnings' | 'inspector'>('warnings');
   const [cursorLine, setCursorLine] = useState(1);
-  const [showDiff, setShowDiff] = useState(false);
+  const [showDiff, setShowDiff] = useState(true);
   const [diff, setDiff] = useState('');
   const [builderOpen, setBuilderOpen] = useState(false);
   const [commentOpen, setCommentOpen] = useState(false);
@@ -174,6 +174,12 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
     ed.onDidChangeCursorPosition((e) => setCursorLine(e.position.lineNumber));
     setReady(true);
   };
+
+  // Keep the "what changed" diff current when the file changes or after a save.
+  useEffect(() => {
+    if (showDiff) loadDiff();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeFile, savedVersion, showDiff]);
 
   function gotoLine(line: number) {
     const ed = editorRef.current; if (!ed) return;
@@ -248,7 +254,7 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
             {dirty && <span className="badge warning" style={{ fontSize: 11 }}>unsaved</span>}
             <input className="input" style={{ height: 26, flex: 1, minWidth: 80 }} placeholder="commit message" value={message} onChange={(e) => setMessage(e.target.value)} disabled={merged} />
             <button className="btn btn-sm btn-primary" onClick={save} disabled={!dirty || saving || merged || !canEdit(me?.roles)}>{saving ? <span className="spinner" /> : null}Save</button>
-            <button className="btn btn-sm" onClick={toggleDiff}>{showDiff ? 'Hide diff' : 'Diff'}</button>
+            <button className="btn btn-sm" onClick={toggleDiff}>{showDiff ? 'Hide changes' : 'Show changes'}</button>
           </div>
           <div className="editor-toolbar" style={{ gap: 6, flexWrap: 'wrap' }}>
             <span className="faint" style={{ fontSize: 11 }}>line {cursorLine}</span>
@@ -287,7 +293,15 @@ function InstanceWorkspace({ changeId, target, me, merged, approved, onMerged }:
         </div>
       </div>
 
-      {showDiff && (diff.trim() ? <DiffLines patch={diff} /> : <div className="panel"><div className="empty">No changes to {activeFile} yet.</div></div>)}
+      {showDiff && (
+        <div className="panel">
+          <div className="panel-head">
+            <span className="mono" style={{ fontWeight: 600 }}>Changes to {activeFile}</span>
+            <span className="faint" style={{ fontSize: 12 }}>{instance} · compared to the current instance config</span>
+          </div>
+          {diff.trim() ? <DiffLines patch={diff} /> : <div className="empty">No saved changes to this file yet. Edit and Save to see your added and removed lines here.</div>}
+        </div>
+      )}
 
       <MergePanel changeId={changeId} target={target} me={me} merged={merged} approved={approved} anyDirty={anyDirty} savedVersion={savedVersion} onMerged={onMerged} />
     </div>

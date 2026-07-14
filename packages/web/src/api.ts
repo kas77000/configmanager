@@ -30,7 +30,7 @@ export interface InstanceInfo {
   code: string; environment: Environment; uat: boolean; files: string[];
   serverAddress?: string; paths?: Record<string, string>;
 }
-export interface Settings { quantDistributionEmail: string; }
+export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export interface ChangeItem { file: string; description: string; instances: string[]; }

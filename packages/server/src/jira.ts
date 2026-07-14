@@ -1,5 +1,6 @@
 export interface JiraClient {
-  createIssue(summary: string, description: string): Promise<{ key: string; url: string }>;
+  /** `parentEpic`, when given, links the new issue under that epic. */
+  createIssue(summary: string, description: string, parentEpic?: string): Promise<{ key: string; url: string }>;
 }
 
 /** Dev/no-credentials client: fabricates ticket keys so the workflow runs without real Jira. */
@@ -18,12 +19,14 @@ export interface JiraConfig { baseUrl: string; project: string; email: string; t
 /** Real Jira Cloud/Server client via the REST API (Basic auth: email + API token). */
 export class HttpJiraClient implements JiraClient {
   constructor(private readonly cfg: JiraConfig) {}
-  async createIssue(summary: string, description: string): Promise<{ key: string; url: string }> {
+  async createIssue(summary: string, description: string, parentEpic?: string): Promise<{ key: string; url: string }> {
     const auth = Buffer.from(`${this.cfg.email}:${this.cfg.token}`).toString('base64');
+    const fields: Record<string, unknown> = { project: { key: this.cfg.project }, summary, description, issuetype: { name: 'Task' } };
+    if (parentEpic) fields.parent = { key: parentEpic }; // link under the config-changes epic
     const res = await fetch(`${this.cfg.baseUrl.replace(/\/$/, '')}/rest/api/2/issue`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Basic ${auth}` },
-      body: JSON.stringify({ fields: { project: { key: this.cfg.project }, summary, description, issuetype: { name: 'Task' } } }),
+      body: JSON.stringify({ fields }),
     });
     if (!res.ok) throw new Error(`Jira ${res.status}: ${await res.text()}`);
     const data = (await res.json()) as { key: string };
