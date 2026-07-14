@@ -91,6 +91,7 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
           {requester && change.status === 'merged' &&
             <button className="btn btn-sm" disabled={busy} onClick={() => act(downloadEml(change.id, 'recap'))} title="Opens a pre-filled Outlook recap draft">Recap email…</button>}
           {canSubmit && <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(api.submitChange(change.id))}>Submit for approval</button>}
+          {requester && change.status === 'draft' && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(api.cancelChange(change.id))}>Cancel change</button>}
           {canDecide && <button className="btn btn-sm" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} disabled={busy} onClick={() => act(api.approveChange(change.id))}><IconCheck style={{ width: 14, height: 14 }} />Approve</button>}
           {canDecide && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setRejecting((v) => !v)}>Reject</button>}
         </div>

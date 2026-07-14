@@ -7,30 +7,17 @@ import { IconChevron, IconCheck } from '../icons';
 export default function InstancePage() {
   const { code = '' } = useParams();
   const [info, setInfo] = useState<InstanceInfo | null>(null);
-  const [activeFile, setActiveFile] = useState('');
-  const [content, setContent] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [contents, setContents] = useState<Record<string, string>>({});
 
   useEffect(() => {
     api.instances().then((list) => {
       const i = list.find((x) => x.code === code) ?? null;
       setInfo(i);
-      setActiveFile(i?.files[0] ?? '');
+      (i?.files ?? []).forEach((f) => {
+        api.instanceFile(code, f).then((r) => setContents((m) => ({ ...m, [f]: r.content }))).catch(() => setContents((m) => ({ ...m, [f]: '' })));
+      });
     }).catch(() => setInfo(null));
   }, [code]);
-
-  useEffect(() => {
-    if (!activeFile) return;
-    setContent(null);
-    api.instanceFile(code, activeFile).then((r) => setContent(r.content)).catch(() => setContent(''));
-  }, [code, activeFile]);
-
-  async function copy() {
-    if (content == null) return;
-    await navigator.clipboard.writeText(content);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  }
 
   return (
     <div className="page">
@@ -41,26 +28,49 @@ export default function InstancePage() {
             {' · '}Current config
           </div>
           <h1 className="mono">{code}</h1>
-          <p>The latest merged config on this instance. Copy it to apply manually on the server.</p>
+          <p>The latest merged config for every file managed on this instance. Copy each to apply it manually on the server.</p>
+          {info?.serverAddress && <p style={{ marginTop: 6 }}><span className="faint">Server:</span> <span className="mono">{info.serverAddress}</span></p>}
         </div>
-        <button className="btn" onClick={copy} disabled={content == null}>{copied ? <IconCheck style={{ width: 15, height: 15, color: 'var(--success)' }} /> : null}{copied ? 'Copied' : 'Copy file'}</button>
       </div>
 
-      {info && info.files.length > 1 && (
-        <div className="hstack" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-          <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Files</span>
+      {!info ? (
+        <div className="panel"><Skeleton rows={6} /></div>
+      ) : info.files.length === 0 ? (
+        <div className="panel"><div className="empty">No files are managed for this instance yet.</div></div>
+      ) : (
+        <div className="stack" style={{ gap: 16 }}>
           {info.files.map((f) => (
-            <button key={f} className="btn btn-sm mono" style={activeFile === f ? { borderColor: 'var(--accent)', color: 'var(--accent)' } : undefined} onClick={() => setActiveFile(f)}>{f}</button>
+            <FileView key={f} name={f} path={info.paths?.[f]} content={contents[f]} />
           ))}
         </div>
       )}
+    </div>
+  );
+}
 
-      <div className="panel">
-        <div className="panel-head"><span className="mono" style={{ fontWeight: 600 }}>{activeFile}</span>{content != null && <span className="faint" style={{ fontSize: 12 }}>{content.split('\n').length} lines</span>}</div>
-        {content == null ? <Skeleton rows={8} /> : (
-          <pre className="mono" style={{ margin: 0, padding: '12px 16px', fontSize: 12, lineHeight: 1.6, overflow: 'auto', maxHeight: '65vh', whiteSpace: 'pre' }}>{content || '(empty)'}</pre>
-        )}
+function FileView({ name, path, content }: { name: string; path?: string; content?: string }) {
+  const [copied, setCopied] = useState(false);
+  async function copy() {
+    if (content == null) return;
+    await navigator.clipboard.writeText(content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+  return (
+    <div className="panel">
+      <div className="panel-head">
+        <div className="stack">
+          <span className="mono" style={{ fontWeight: 600 }}>{name}</span>
+          {path && <span className="faint mono" style={{ fontSize: 11 }}>{path}</span>}
+        </div>
+        <div className="hstack">
+          {content != null && <span className="faint" style={{ fontSize: 12 }}>{content.split('\n').length} lines</span>}
+          <button className="btn btn-sm" onClick={copy} disabled={content == null}>{copied ? <IconCheck style={{ width: 14, height: 14, color: 'var(--success)' }} /> : null}{copied ? 'Copied' : 'Copy'}</button>
+        </div>
       </div>
+      {content == null ? <Skeleton rows={4} /> : (
+        <pre className="mono" style={{ margin: 0, padding: '12px 16px', fontSize: 12, lineHeight: 1.6, overflow: 'auto', maxHeight: '55vh', whiteSpace: 'pre' }}>{content || '(empty)'}</pre>
+      )}
     </div>
   );
 }

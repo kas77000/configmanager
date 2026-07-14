@@ -6,9 +6,20 @@ import { IconPlus, IconTrash } from '../icons';
 export default function People({ me }: { me: User | null }) {
   const [users, setUsers] = useState<User[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [distEmail, setDistEmail] = useState('');
+  const [savedDist, setSavedDist] = useState('');
 
   async function refresh() { setUsers(await api.users()); }
-  useEffect(() => { refresh().catch(() => setUsers([])); }, []);
+  useEffect(() => {
+    refresh().catch(() => setUsers([]));
+    api.settings().then((s) => { setDistEmail(s.quantDistributionEmail); setSavedDist(s.quantDistributionEmail); }).catch(() => {});
+  }, []);
+
+  async function saveDist() {
+    setErr(null);
+    try { const s = await api.updateSettings({ quantDistributionEmail: distEmail.trim() }); setSavedDist(s.quantDistributionEmail); setDistEmail(s.quantDistributionEmail); }
+    catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
+  }
 
   if (me && !isAdmin(me.roles)) {
     return <div className="page"><div className="panel"><div className="empty">Admin only.</div></div></div>;
@@ -30,6 +41,15 @@ export default function People({ me }: { me: User | null }) {
       </div>
 
       {err && <div style={{ marginBottom: 12 }}><span className="badge error">{err}</span></div>}
+
+      <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
+        <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600 }}>Quant distribution email</span>
+          <input className="input" style={{ maxWidth: 360 }} value={distEmail} onChange={(e) => setDistEmail(e.target.value)} placeholder="quant-team@firm.com" />
+          <button className="btn btn-sm" disabled={distEmail.trim() === savedDist} onClick={saveDist}>Save</button>
+          <span className="faint" style={{ fontSize: 12 }}>CC'd on every approval-request email.</span>
+        </label>
+      </div>
 
       <AddPerson onDone={refresh} onError={setErr} />
 

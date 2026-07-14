@@ -9,6 +9,7 @@ import { UserDirectory, type User } from './store/users';
 import { AuditLog, type AuditEvent } from './store/audit';
 import { ChangeStore, type Change } from './store/changes';
 import { InstanceStore, type ManagedInstance } from './store/instances';
+import { SettingsStore, type Settings, defaultSettings } from './store/settings';
 import { StaticInstanceReader } from './instance-reader';
 import { makeJiraClient } from './jira';
 import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig } from './config';
@@ -36,9 +37,10 @@ export async function main(): Promise<void> {
 
   const reader = new StaticInstanceReader();
   const jira = makeJiraClient(process.env);
+  const settings = new SettingsStore(new JsonStore<Settings>(join(cfg.dataDir, 'settings.json'), defaultSettings));
 
   const app = createApp({
-    repo, users, audit, changes, instances, reader, jira,
+    repo, users, audit, changes, instances, reader, jira, settings,
     appBaseUrl: cfg.appBaseUrl,
     identity: { header: IDENTITY_HEADER, devUser: process.env[DEV_USER_ENV] },
   });

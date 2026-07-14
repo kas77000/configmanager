@@ -1,6 +1,6 @@
 import type { Change } from './store/changes';
 
-export interface BuiltEmail { to: string[]; subject: string; html: string; }
+export interface BuiltEmail { to: string[]; cc?: string[]; subject: string; html: string; }
 
 function esc(s: string): string {
   return s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]!));
@@ -31,7 +31,7 @@ function shell(title: string, intro: string, body: string, link: string): string
   ].join('\n');
 }
 
-export function approvalEmail(change: Change, recipients: string[], appBaseUrl: string): BuiltEmail {
+export function approvalEmail(change: Change, recipients: string[], cc: string[], appBaseUrl: string): BuiltEmail {
   const rows = fileRows(change)
     .map((r) => `<tr><td style="${TD}">${esc(change.description)}</td><td style="${TD}">${esc(r.file)}</td><td style="${TD}">${esc(r.instances.join(', '))}</td></tr>`)
     .join('');
@@ -39,6 +39,7 @@ export function approvalEmail(change: Change, recipients: string[], appBaseUrl: 
   const link = `${appBaseUrl.replace(/\/$/, '')}/changes/${change.id}`;
   return {
     to: recipients,
+    cc,
     subject: `Config change request ${change.id}: ${change.description}`,
     html: shell(`Change ${change.id}`, 'Please review and approve or reject the following configuration change:', table, link),
   };
@@ -64,13 +65,8 @@ export function recapEmail(change: Change, appBaseUrl: string): BuiltEmail {
 
 /** RFC822 message. `X-Unsent: 1` makes Outlook open the .eml as an editable draft ready to send. */
 export function toEml(email: BuiltEmail): string {
-  return [
-    `To: ${email.to.join(', ')}`,
-    `Subject: ${email.subject}`,
-    'X-Unsent: 1',
-    'MIME-Version: 1.0',
-    'Content-Type: text/html; charset=utf-8',
-    '',
-    email.html,
-  ].join('\r\n');
+  const headers = [`To: ${email.to.join(', ')}`];
+  if (email.cc && email.cc.length) headers.push(`Cc: ${email.cc.join(', ')}`);
+  headers.push(`Subject: ${email.subject}`, 'X-Unsent: 1', 'MIME-Version: 1.0', 'Content-Type: text/html; charset=utf-8', '', email.html);
+  return headers.join('\r\n');
 }

@@ -92,6 +92,16 @@ export class ChangeStore {
     });
   }
 
+  /** Cancels a draft change. */
+  async cancel(id: string, _by: string): Promise<Change | undefined> {
+    return this.store.update((changes) => {
+      const change = changes.find((c) => c.id === id);
+      if (!change) return undefined;
+      if (change.status === 'draft') change.status = 'cancelled';
+      return change;
+    });
+  }
+
   /** Submits a draft/rejected change for approval. */
   async submit(id: string, by: string): Promise<Change | undefined> {
     return this.store.update((changes) => {

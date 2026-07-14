@@ -11,6 +11,7 @@ import { UserDirectory, type User } from '../src/store/users';
 import { AuditLog, type AuditEvent } from '../src/store/audit';
 import { ChangeStore, type Change } from '../src/store/changes';
 import { InstanceStore, type ManagedInstance } from '../src/store/instances';
+import { SettingsStore, defaultSettings, type Settings } from '../src/store/settings';
 import { StaticInstanceReader } from '../src/instance-reader';
 import { StubJiraClient } from '../src/jira';
 import { seedInstances, seedRepo } from '../src/bootstrap';
@@ -38,7 +39,8 @@ async function makeHarness(): Promise<Harness> {
   reader.set('APIA', FILE, CLEAN); // live matches recorded by default
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', roles: ['admin'] });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', roles: ['editor'] });
-  const app = createApp({ repo, users, audit, changes, instances, reader, jira: new StubJiraClient(), appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
+  const settings = new SettingsStore(new JsonStore<Settings>(join(dir, 'settings.json'), defaultSettings));
+  const app = createApp({ repo, users, audit, changes, instances, reader, jira: new StubJiraClient(), settings, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
@@ -266,6 +268,38 @@ describe('API (per-instance)', () => {
     expect(eml.text).toContain('boss@x');
     expect(eml.text).toContain('Newly applies to instances');
     expect(eml.text).toContain('risk.properties');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('cancels a draft change', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
+    const c = await ed('post', `/api/changes/${id}/cancel`).expect(200);
+    expect(c.body.status).toBe('cancelled');
+    await ed('post', `/api/changes/${id}/cancel`).expect(409); // no longer a draft
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('CCs the quant distribution list on approval emails', async () => {
+    const h = await makeHarness();
+    await as(h.app, 'root')('patch', '/api/settings').send({ quantDistributionEmail: 'quant-team@firm.com' }).expect(200);
+    const ed = as(h.app, 'ed');
+    const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
+    const eml = await ed('get', `/api/changes/${id}/email/approval`).expect(200);
+    expect(eml.text).toContain('Cc: quant-team@firm.com');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('stores an instance server address and a per-file path', async () => {
+    const h = await makeHarness();
+    const admin = as(h.app, 'root');
+    await admin('patch', '/api/instances/APIA').send({ serverAddress: '\\\\APIA\\config' }).expect(200);
+    await admin('patch', '/api/instances/APIA/files/ai.fixmsg.properties').send({ path: 'D:/cfg/ai.fixmsg.properties' }).expect(200);
+    const list = await admin('get', '/api/instances').expect(200);
+    const apia = list.body.find((i: { code: string }) => i.code === 'APIA') as { serverAddress: string; paths: Record<string, string> };
+    expect(apia.serverAddress).toBe('\\\\APIA\\config');
+    expect(apia.paths['ai.fixmsg.properties']).toBe('D:/cfg/ai.fixmsg.properties');
     await rm(h.dir, { recursive: true, force: true });
   });
 

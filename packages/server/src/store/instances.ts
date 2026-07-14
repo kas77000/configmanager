@@ -9,6 +9,10 @@ export interface ManagedInstance {
   uat: boolean;
   /** Config files managed for this instance. */
   files: string[];
+  /** Address of the server hosting this instance (hostname / share). */
+  serverAddress?: string;
+  /** Full path to each managed file on the server (filename -> path). */
+  paths?: Record<string, string>;
 }
 
 const CODE_RE = /^[A-Za-z0-9_-]+$/;
@@ -43,13 +47,23 @@ export class InstanceStore {
     });
   }
 
-  async update(code: string, patch: Partial<Pick<ManagedInstance, 'environment' | 'uat'>>): Promise<ManagedInstance | undefined> {
+  async update(code: string, patch: Partial<Pick<ManagedInstance, 'environment' | 'uat' | 'serverAddress'>>): Promise<ManagedInstance | undefined> {
     return this.store.update((list) => {
       const inst = list.find((i) => i.code === code);
       if (!inst) return undefined;
       if (patch.uat === true) list.forEach((i) => (i.uat = false));
       if (patch.environment) inst.environment = patch.environment;
       if (patch.uat !== undefined) inst.uat = patch.uat;
+      if (patch.serverAddress !== undefined) inst.serverAddress = patch.serverAddress;
+      return { ...inst };
+    });
+  }
+
+  async setFilePath(code: string, file: string, path: string): Promise<ManagedInstance | undefined> {
+    return this.store.update((list) => {
+      const inst = list.find((i) => i.code === code);
+      if (!inst) return undefined;
+      inst.paths = { ...(inst.paths ?? {}), [file]: path };
       return { ...inst };
     });
   }

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, isAdmin, type Environment, type InstanceInfo, type User } from '../api';
 import { Skeleton } from '../components';
-import { IconPlus, IconTrash, IconX } from '../icons';
+import { IconChevron, IconPlus, IconTrash, IconX } from '../icons';
 
 export default function Admin({ me }: { me: User | null }) {
   const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
@@ -70,58 +70,93 @@ function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>
   const [addingFile, setAddingFile] = useState(false);
   const [fileName, setFileName] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const [server, setServer] = useState(inst.serverAddress ?? '');
 
   return (
-    <tr>
-      <td className="mono" style={{ fontWeight: 600 }}>{inst.code}</td>
-      <td>
-        <select className="input" style={{ height: 28, padding: '0 8px' }} value={inst.environment}
-          onChange={(e) => run(api.updateInstance(inst.code, { environment: e.target.value as Environment }))}>
-          <option value="pilot">pilot</option>
-          <option value="production">production</option>
-        </select>
-      </td>
-      <td>
-        <input type="checkbox" checked={inst.uat} title="Set as UAT instance"
-          onChange={(e) => run(api.updateInstance(inst.code, { uat: e.target.checked }))} />
-      </td>
-      <td>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-          {inst.files.map((f) => (
-            <span key={f} className="chip">
-              {f}
-              <button className="btn-ghost" title="Stop managing this file"
-                style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', color: 'var(--faint)' }}
-                onClick={() => run(api.removeInstanceFile(inst.code, f))}>
-                <IconX style={{ width: 12, height: 12 }} />
-              </button>
-            </span>
-          ))}
-          {addingFile ? (
-            <span className="hstack" style={{ gap: 4 }}>
-              <input className="input" style={{ height: 26, width: 180 }} placeholder="filename.properties" autoFocus
-                value={fileName} onChange={(e) => setFileName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && fileName.trim()) { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); } }} />
-              <button className="btn btn-sm btn-primary" disabled={!fileName.trim()}
-                onClick={() => { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); }}>Add</button>
-              <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(false)}>Cancel</button>
+    <>
+      <tr>
+        <td className="mono" style={{ fontWeight: 600 }}>
+          <button className="btn-ghost" style={{ border: 0, background: 'none', padding: 0, marginRight: 6, cursor: 'pointer', color: 'var(--faint)', display: 'inline-flex', verticalAlign: 'middle' }} onClick={() => setExpanded((v) => !v)}>
+            <IconChevron style={{ width: 13, height: 13, transform: expanded ? 'rotate(90deg)' : 'none', transition: 'transform 150ms var(--ease)' }} />
+          </button>
+          {inst.code}
+        </td>
+        <td>
+          <select className="input" style={{ height: 28, padding: '0 8px' }} value={inst.environment}
+            onChange={(e) => run(api.updateInstance(inst.code, { environment: e.target.value as Environment }))}>
+            <option value="pilot">pilot</option>
+            <option value="production">production</option>
+          </select>
+        </td>
+        <td>
+          <input type="checkbox" checked={inst.uat} title="Set as UAT instance"
+            onChange={(e) => run(api.updateInstance(inst.code, { uat: e.target.checked }))} />
+        </td>
+        <td>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+            {inst.files.map((f) => (
+              <span key={f} className="chip">
+                {f}
+                <button className="btn-ghost" title="Stop managing this file"
+                  style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', color: 'var(--faint)' }}
+                  onClick={() => run(api.removeInstanceFile(inst.code, f))}>
+                  <IconX style={{ width: 12, height: 12 }} />
+                </button>
+              </span>
+            ))}
+            {addingFile ? (
+              <span className="hstack" style={{ gap: 4 }}>
+                <input className="input" style={{ height: 26, width: 180 }} placeholder="filename.properties" autoFocus
+                  value={fileName} onChange={(e) => setFileName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && fileName.trim()) { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); } }} />
+                <button className="btn btn-sm btn-primary" disabled={!fileName.trim()}
+                  onClick={() => { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); }}>Add</button>
+                <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(false)}>Cancel</button>
+              </span>
+            ) : (
+              <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(true)}><IconPlus style={{ width: 13, height: 13 }} />file</button>
+            )}
+          </div>
+        </td>
+        <td style={{ textAlign: 'right' }}>
+          {confirmDel ? (
+            <span className="hstack" style={{ justifyContent: 'flex-end' }}>
+              <button className="btn btn-sm btn-danger" onClick={() => run(api.deleteInstance(inst.code))}>Confirm</button>
+              <button className="btn btn-sm btn-ghost" onClick={() => setConfirmDel(false)}>No</button>
             </span>
           ) : (
-            <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(true)}><IconPlus style={{ width: 13, height: 13 }} />file</button>
+            <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(true)}><IconTrash style={{ width: 14, height: 14 }} />Delete</button>
           )}
-        </div>
-      </td>
-      <td style={{ textAlign: 'right' }}>
-        {confirmDel ? (
-          <span className="hstack" style={{ justifyContent: 'flex-end' }}>
-            <button className="btn btn-sm btn-danger" onClick={() => run(api.deleteInstance(inst.code))}>Confirm</button>
-            <button className="btn btn-sm btn-ghost" onClick={() => setConfirmDel(false)}>No</button>
-          </span>
-        ) : (
-          <button className="btn btn-sm btn-danger" onClick={() => setConfirmDel(true)}><IconTrash style={{ width: 14, height: 14 }} />Delete</button>
-        )}
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {expanded && (
+        <tr>
+          <td colSpan={5} style={{ background: 'var(--raised)' }}>
+            <div className="stack" style={{ gap: 12, padding: '6px 4px 10px' }}>
+              <label className="hstack" style={{ gap: 8 }}>
+                <span className="faint" style={{ fontSize: 12, width: 120 }}>Server address</span>
+                <input className="input mono" style={{ height: 28, maxWidth: 420 }} placeholder="\\APIA\config or api-a.firm.com" value={server}
+                  onChange={(e) => setServer(e.target.value)} onBlur={() => { if (server !== (inst.serverAddress ?? '')) run(api.updateInstance(inst.code, { serverAddress: server })); }} />
+              </label>
+              {inst.files.length > 0 && <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths on the server</div>}
+              {inst.files.map((f) => <PathRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} run={run} />)}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function PathRow({ code, file, path, run }: { code: string; file: string; path: string; run: <T>(p: Promise<T>) => Promise<void> }) {
+  const [value, setValue] = useState(path);
+  return (
+    <label className="hstack" style={{ gap: 8 }}>
+      <span className="mono" style={{ fontSize: 12, width: 180, color: 'var(--muted)' }}>{file}</span>
+      <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder="path to this file on the server" value={value}
+        onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) run(api.setInstanceFilePath(code, file, value)); }} />
+    </label>
   );
 }
 

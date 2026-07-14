@@ -26,7 +26,11 @@ export function roleSummary(roles?: Role[]): string {
 }
 
 export type Environment = 'pilot' | 'production';
-export interface InstanceInfo { code: string; environment: Environment; uat: boolean; files: string[]; }
+export interface InstanceInfo {
+  code: string; environment: Environment; uat: boolean; files: string[];
+  serverAddress?: string; paths?: Record<string, string>;
+}
+export interface Settings { quantDistributionEmail: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
@@ -105,10 +109,14 @@ export const api = {
   sync: (code: string) => req<DriftResult & { updated: boolean; commit?: string }>('POST', `/instances/${code}/sync`, {}),
 
   createInstance: (body: { code: string; environment: Environment; uat: boolean; copyFrom?: string }) => req<InstanceInfo>('POST', '/instances', body),
-  updateInstance: (code: string, patch: { environment?: Environment; uat?: boolean }) => req<InstanceInfo>('PATCH', `/instances/${code}`, patch),
+  updateInstance: (code: string, patch: { environment?: Environment; uat?: boolean; serverAddress?: string }) => req<InstanceInfo>('PATCH', `/instances/${code}`, patch),
   deleteInstance: (code: string) => req<{ deleted: boolean }>('DELETE', `/instances/${code}`),
-  addInstanceFile: (code: string, file: string, content?: string) => req<InstanceInfo>('POST', `/instances/${code}/files`, { file, content }),
+  addInstanceFile: (code: string, file: string, content?: string, path?: string) => req<InstanceInfo>('POST', `/instances/${code}/files`, { file, content, path }),
+  setInstanceFilePath: (code: string, file: string, path: string) => req<InstanceInfo>('PATCH', `/instances/${code}/files/${encodeURIComponent(file)}`, { path }),
   removeInstanceFile: (code: string, file: string) => req<InstanceInfo>('DELETE', `/instances/${code}/files/${encodeURIComponent(file)}`),
+
+  settings: () => req<Settings>('GET', '/settings'),
+  updateSettings: (patch: Partial<Settings>) => req<Settings>('PATCH', '/settings', patch),
 
   commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 
@@ -120,6 +128,7 @@ export const api = {
   changes: () => req<Change[]>('GET', '/changes'),
   createChange: (description: string, instances: string[], files: string[]) => req<Change>('POST', '/changes', { description, instances, files }),
   change: (id: string) => req<Change>('GET', `/changes/${id}`),
+  cancelChange: (id: string) => req<Change>('POST', `/changes/${id}/cancel`, {}),
   submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),
   approveChange: (id: string) => req<Change>('POST', `/changes/${id}/approve`, {}),
   rejectChange: (id: string, reason: string) => req<Change>('POST', `/changes/${id}/reject`, { reason }),

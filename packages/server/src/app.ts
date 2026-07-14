@@ -5,6 +5,7 @@ import type { AuditLog } from './store/audit';
 import type { Change, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
 import type { JiraClient } from './jira';
+import type { SettingsStore } from './store/settings';
 import { approvalEmail, recapEmail, toEml } from './email';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
@@ -22,6 +23,7 @@ export interface AppDeps {
   instances: InstanceStore;
   reader: InstanceReader;
   jira: JiraClient;
+  settings: SettingsStore;
   /** Base URL of the web app, used in email links. */
   appBaseUrl: string;
   identity: { header: string; devUser?: string };
@@ -104,6 +106,18 @@ export function createApp(deps: AppDeps): Express {
     res.json({ deleted: true });
   }));
 
+  // --- Settings (admin) ----------------------------------------------------
+  api.get('/settings', wrap(async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    res.json(await deps.settings.get());
+  }));
+  api.patch('/settings', wrap(async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const patch: { quantDistributionEmail?: string } = {};
+    if (req.body?.quantDistributionEmail !== undefined) patch.quantDistributionEmail = String(req.body.quantDistributionEmail).trim();
+    res.json(await deps.settings.update(patch));
+  }));
+
   // --- Instances -----------------------------------------------------------
   api.get('/instances', wrap(async (_req, res) => res.json(await instances.list())));
 
@@ -135,12 +149,13 @@ export function createApp(deps: AppDeps): Express {
 
   api.patch('/instances/:code', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { environment?: 'pilot' | 'production'; uat?: boolean } = {};
+    const patch: { environment?: 'pilot' | 'production'; uat?: boolean; serverAddress?: string } = {};
     if (req.body?.environment !== undefined) {
       if (req.body.environment !== 'pilot' && req.body.environment !== 'production') { res.status(400).json({ error: 'environment must be pilot|production' }); return; }
       patch.environment = req.body.environment;
     }
     if (req.body?.uat !== undefined) patch.uat = req.body.uat === true;
+    if (req.body?.serverAddress !== undefined) patch.serverAddress = String(req.body.serverAddress);
     const updated = await instances.update(req.params.code, patch);
     if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-instance', branch: instanceBranch(req.params.code), details: patch });
@@ -168,9 +183,18 @@ export function createApp(deps: AppDeps): Express {
     if (!(await repo.fileExistsAt(branch, file))) {
       await repo.commitFile(branch, file, content, author(req), `add managed file ${file}`);
     }
-    const updated = await instances.addFile(code, file);
+    await instances.addFile(code, file);
+    const path = req.body?.path !== undefined ? String(req.body.path) : undefined;
+    const updated = path ? await instances.setFilePath(code, file, path) : await instances.get(code);
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'add-file', branch, details: { file } });
     res.status(201).json(updated);
+  }));
+
+  api.patch('/instances/:code/files/:file', wrap(async (req, res) => {
+    if (!requireAdmin(req, res)) return;
+    const updated = await instances.setFilePath(req.params.code, req.params.file, String(req.body?.path ?? ''));
+    if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
+    res.json(updated);
   }));
 
   api.delete('/instances/:code/files/:file', wrap(async (req, res) => {
@@ -311,6 +335,16 @@ export function createApp(deps: AppDeps): Express {
     res.json(change);
   }));
 
+  api.post('/changes/:id/cancel', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
+    const existing = await changes.get(req.params.id);
+    if (!existing) { res.status(404).json({ error: 'change not found' }); return; }
+    if (existing.status !== 'draft') { res.status(409).json({ error: 'only a draft change can be cancelled' }); return; }
+    const change = await changes.cancel(req.params.id, requireUser(req).windowsId);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'cancel-change', details: { changeId: req.params.id } });
+    res.json(change);
+  }));
+
   api.post('/changes/:id/approve', wrap(async (req, res) => {
     if (!requireApprove(req, res)) return;
     const change = await changes.decide(req.params.id, requireUser(req).windowsId, 'approved');
@@ -343,7 +377,8 @@ export function createApp(deps: AppDeps): Express {
     const kind = req.params.kind;
     if (kind !== 'approval' && kind !== 'recap') { res.status(404).json({ error: 'unknown email kind' }); return; }
     const recipients = (await users.list()).filter((u) => canApprove(u.roles) && u.email).map((u) => u.email);
-    const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl) : approvalEmail(change, recipients, deps.appBaseUrl);
+    const distro = (await deps.settings.get()).quantDistributionEmail;
+    const email = kind === 'recap' ? recapEmail(change, deps.appBaseUrl) : approvalEmail(change, recipients, distro ? [distro] : [], deps.appBaseUrl);
     res.setHeader('Content-Type', 'message/rfc822');
     res.setHeader('Content-Disposition', `attachment; filename="change-${change.id}-${kind}.eml"`);
     res.send(toEml(email));
