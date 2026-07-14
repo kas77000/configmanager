@@ -14,7 +14,7 @@ export default function History() {
   const [data, setData] = useState<{ commits: Commit[]; audit: AuditEvent[] } | null>(null);
   const [instances, setInstances] = useState<InstanceInfo[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [range, setRange] = useState<Range>('all');
+  const [range, setRange] = useState<Range>('24h');
 
   useEffect(() => {
     api.history().then(setData).catch(() => setData({ commits: [], audit: [] }));
