@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "baseUrl": ".",
+    "types": ["node"],
+    "paths": {
+      "@config-manager/rule-engine": ["../rule-engine/src/index.ts"]
+    }
+  },
+  "include": ["src", "test"]
+}
