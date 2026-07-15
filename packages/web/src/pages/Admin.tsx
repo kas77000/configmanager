@@ -7,11 +7,29 @@ export default function Admin({ me }: { me: User | null }) {
   const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
   const [adding, setAdding] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [saUser, setSaUser] = useState('');
+  const [saPassword, setSaPassword] = useState('');
+  const [saConfigured, setSaConfigured] = useState(false);
+  const [savedUser, setSavedUser] = useState('');
 
   async function refresh() {
     setInstances(await api.instances());
   }
-  useEffect(() => { refresh().catch(() => setInstances([])); }, []);
+  useEffect(() => {
+    refresh().catch(() => setInstances([]));
+    api.settings().then((s) => { setSaUser(s.serviceAccountUser); setSavedUser(s.serviceAccountUser); setSaConfigured(s.serviceAccountConfigured); }).catch(() => {});
+  }, []);
+
+  async function saveServiceAccount() {
+    setErr(null);
+    try {
+      const patch: { serviceAccountUser: string; serviceAccountPassword?: string } = { serviceAccountUser: saUser.trim() };
+      if (saPassword) patch.serviceAccountPassword = saPassword;
+      const s = await api.updateSettings(patch);
+      setSaUser(s.serviceAccountUser); setSavedUser(s.serviceAccountUser); setSaConfigured(s.serviceAccountConfigured); setSaPassword('');
+    } catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
+  }
+  const saDirty = saUser.trim() !== savedUser || saPassword.length > 0;
 
   if (me && !isAdmin(me.roles)) {
     return <div className="page"><div className="panel"><div className="empty">Admin only.</div></div></div>;
@@ -35,6 +53,25 @@ export default function Admin({ me }: { me: User | null }) {
       </div>
 
       {err && <div style={{ marginBottom: 12 }}><span className="badge error">{err}</span></div>}
+
+      <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Service account</span>
+            <span className="faint" style={{ fontSize: 12 }}>Credentials the app uses to connect to the instances and read live configs.</span>
+          </div>
+          <label className="hstack" style={{ gap: 10 }}>
+            <span style={{ width: 110, fontSize: 12, color: 'var(--muted)' }}>Username</span>
+            <input className="input mono" style={{ maxWidth: 300 }} value={saUser} onChange={(e) => setSaUser(e.target.value)} placeholder="DOMAIN\svc-config" spellCheck={false} />
+          </label>
+          <label className="hstack" style={{ gap: 10 }}>
+            <span style={{ width: 110, fontSize: 12, color: 'var(--muted)' }}>Password</span>
+            <input className="input" type="password" style={{ maxWidth: 300 }} value={saPassword} onChange={(e) => setSaPassword(e.target.value)} placeholder={saConfigured ? 'set — leave blank to keep' : 'enter password'} autoComplete="new-password" />
+            {saConfigured && <span className="badge success" style={{ fontSize: 11 }}>configured</span>}
+          </label>
+          <div><button className="btn btn-sm" onClick={saveServiceAccount} disabled={!saDirty}>Save service account</button></div>
+        </div>
+      </div>
 
       {adding && instances && (
         <AddInstance instances={instances} onDone={() => { setAdding(false); refresh(); }} onError={setErr} />

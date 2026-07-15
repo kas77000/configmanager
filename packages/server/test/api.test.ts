@@ -304,6 +304,19 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
+  it('stores service-account credentials without returning the password', async () => {
+    const h = await makeHarness();
+    const admin = as(h.app, 'root');
+    const res = await admin('patch', '/api/settings').send({ serviceAccountUser: 'DOMAIN\\svc-config', serviceAccountPassword: 'secret' }).expect(200);
+    expect(res.body.serviceAccountUser).toBe('DOMAIN\\svc-config');
+    expect(res.body.serviceAccountConfigured).toBe(true);
+    expect(res.body).not.toHaveProperty('serviceAccountPassword');
+    const got = await admin('get', '/api/settings').expect(200);
+    expect(got.body.serviceAccountConfigured).toBe(true);
+    expect(got.body).not.toHaveProperty('serviceAccountPassword');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
   it('stores an instance server address and a per-file path', async () => {
     const h = await makeHarness();
     const admin = as(h.app, 'root');

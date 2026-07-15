@@ -30,7 +30,8 @@ export interface InstanceInfo {
   code: string; environment: Environment; uat: boolean; files: string[];
   serverAddress?: string; paths?: Record<string, string>;
 }
-export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; }
+export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; serviceAccountUser: string; serviceAccountConfigured: boolean; }
+export interface SettingsPatch { quantDistributionEmail?: string; jiraEpicKey?: string; serviceAccountUser?: string; serviceAccountPassword?: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export interface ChangeItem { file: string; description: string; instances: string[]; }
@@ -117,7 +118,7 @@ export const api = {
   removeInstanceFile: (code: string, file: string) => req<InstanceInfo>('DELETE', `/instances/${code}/files/${encodeURIComponent(file)}`),
 
   settings: () => req<Settings>('GET', '/settings'),
-  updateSettings: (patch: Partial<Settings>) => req<Settings>('PATCH', '/settings', patch),
+  updateSettings: (patch: SettingsPatch) => req<Settings>('PATCH', '/settings', patch),
 
   commit: (hash: string) => req<CommitDetail>('GET', `/commits/${hash}`),
 

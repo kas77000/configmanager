@@ -5,7 +5,7 @@ import type { AuditLog } from './store/audit';
 import type { Change, ChangeItem, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
 import type { JiraClient } from './jira';
-import type { SettingsStore } from './store/settings';
+import { type SettingsStore, toPublicSettings } from './store/settings';
 import { approvalEmail, recapEmail, toEml } from './email';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
@@ -109,14 +109,16 @@ export function createApp(deps: AppDeps): Express {
   // --- Settings (admin) ----------------------------------------------------
   api.get('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    res.json(await deps.settings.get());
+    res.json(toPublicSettings(await deps.settings.get()));
   }));
   api.patch('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string } = {};
+    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string; serviceAccountUser?: string; serviceAccountPassword?: string } = {};
     if (req.body?.quantDistributionEmail !== undefined) patch.quantDistributionEmail = String(req.body.quantDistributionEmail).trim();
     if (req.body?.jiraEpicKey !== undefined) patch.jiraEpicKey = String(req.body.jiraEpicKey).trim();
-    res.json(await deps.settings.update(patch));
+    if (req.body?.serviceAccountUser !== undefined) patch.serviceAccountUser = String(req.body.serviceAccountUser).trim();
+    if (req.body?.serviceAccountPassword !== undefined) patch.serviceAccountPassword = String(req.body.serviceAccountPassword);
+    res.json(toPublicSettings(await deps.settings.update(patch)));
   }));
 
   // --- Instances -----------------------------------------------------------
