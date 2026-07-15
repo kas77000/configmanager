@@ -26,7 +26,7 @@ interface Harness {
   reader: StaticInstanceReader;
 }
 
-async function makeHarness(jira: JiraClient = new StubJiraClient()): Promise<Harness> {
+async function makeHarness(jira: JiraClient = new StubJiraClient(), serviceAccount = { user: '', configured: false }): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'cfgapi-'));
   const repo = new ConfigRepo(join(dir, 'repo'), FILE);
   await seedRepo(repo, CLEAN);
@@ -40,7 +40,7 @@ async function makeHarness(jira: JiraClient = new StubJiraClient()): Promise<Har
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', roles: ['admin'] });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', roles: ['editor'] });
   const settings = new SettingsStore(new JsonStore<Settings>(join(dir, 'settings.json'), defaultSettings));
-  const app = createApp({ repo, users, audit, changes, instances, reader, jira, settings, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
+  const app = createApp({ repo, users, audit, changes, instances, reader, jira, settings, serviceAccount, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
@@ -304,14 +304,10 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('stores service-account credentials without returning the password', async () => {
-    const h = await makeHarness();
-    const admin = as(h.app, 'root');
-    const res = await admin('patch', '/api/settings').send({ serviceAccountUser: 'DOMAIN\\svc-config', serviceAccountPassword: 'secret' }).expect(200);
-    expect(res.body.serviceAccountUser).toBe('DOMAIN\\svc-config');
-    expect(res.body.serviceAccountConfigured).toBe(true);
-    expect(res.body).not.toHaveProperty('serviceAccountPassword');
-    const got = await admin('get', '/api/settings').expect(200);
+  it('exposes the env service account (user + configured), never a password', async () => {
+    const h = await makeHarness(new StubJiraClient(), { user: 'svc-config', configured: true });
+    const got = await as(h.app, 'root')('get', '/api/settings').expect(200);
+    expect(got.body.serviceAccountUser).toBe('svc-config');
     expect(got.body.serviceAccountConfigured).toBe(true);
     expect(got.body).not.toHaveProperty('serviceAccountPassword');
     await rm(h.dir, { recursive: true, force: true });

@@ -5,33 +5,22 @@ export interface Settings {
   quantDistributionEmail: string;
   /** Jira epic that all config-change tickets are created under. */
   jiraEpicKey: string;
-  /** Service account used to connect to the instances (to read live configs). */
-  serviceAccountUser: string;
-  serviceAccountPassword: string;
 }
 
 export const defaultSettings: Settings = {
   quantDistributionEmail: '',
   jiraEpicKey: 'BSGPTALGO-550',
-  serviceAccountUser: '',
-  serviceAccountPassword: '',
 };
 
-/** Settings safe to send to the client: the password is never returned, only whether it is set. */
-export interface PublicSettings {
-  quantDistributionEmail: string;
-  jiraEpicKey: string;
-  serviceAccountUser: string;
-  serviceAccountConfigured: boolean;
-}
+/**
+ * The service account used to reach the instances. It is provided by the environment
+ * (a .env file / real env vars), not stored by the app. Only the username and a
+ * "configured" flag are ever exposed; the password stays in the server's environment.
+ */
+export interface ServiceAccount { user: string; configured: boolean }
 
-export function toPublicSettings(s: Partial<Settings>): PublicSettings {
-  return {
-    quantDistributionEmail: s.quantDistributionEmail ?? '',
-    jiraEpicKey: s.jiraEpicKey ?? defaultSettings.jiraEpicKey,
-    serviceAccountUser: s.serviceAccountUser ?? '',
-    serviceAccountConfigured: (s.serviceAccountPassword ?? '').length > 0,
-  };
+export function serviceAccountFromEnv(env: NodeJS.ProcessEnv): ServiceAccount {
+  return { user: env.SERVICE_ACCOUNT_USER ?? '', configured: (env.SERVICE_ACCOUNT_PASSWORD ?? '').length > 0 };
 }
 
 export class SettingsStore {

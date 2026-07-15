@@ -31,7 +31,7 @@ export interface InstanceInfo {
   serverAddress?: string; paths?: Record<string, string>;
 }
 export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; serviceAccountUser: string; serviceAccountConfigured: boolean; }
-export interface SettingsPatch { quantDistributionEmail?: string; jiraEpicKey?: string; serviceAccountUser?: string; serviceAccountPassword?: string; }
+export interface SettingsPatch { quantDistributionEmail?: string; jiraEpicKey?: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export interface ChangeItem { file: string; description: string; instances: string[]; }

@@ -5,7 +5,7 @@ import type { AuditLog } from './store/audit';
 import type { Change, ChangeItem, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isValidInstanceCode } from './store/instances';
 import type { JiraClient } from './jira';
-import { type SettingsStore, toPublicSettings } from './store/settings';
+import type { ServiceAccount, SettingsStore } from './store/settings';
 import { approvalEmail, recapEmail, toEml } from './email';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
 import { evaluateGate } from './gate';
@@ -24,6 +24,8 @@ export interface AppDeps {
   reader: InstanceReader;
   jira: JiraClient;
   settings: SettingsStore;
+  /** Service account (from the environment), used to reach the instances. */
+  serviceAccount: ServiceAccount;
   /** Base URL of the web app, used in email links. */
   appBaseUrl: string;
   identity: { header: string; devUser?: string };
@@ -107,18 +109,23 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   // --- Settings (admin) ----------------------------------------------------
+  const settingsView = (s: { quantDistributionEmail: string; jiraEpicKey: string }) => ({
+    quantDistributionEmail: s.quantDistributionEmail,
+    jiraEpicKey: s.jiraEpicKey,
+    serviceAccountUser: deps.serviceAccount.user,
+    serviceAccountConfigured: deps.serviceAccount.configured,
+  });
+
   api.get('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    res.json(toPublicSettings(await deps.settings.get()));
+    res.json(settingsView(await deps.settings.get()));
   }));
   api.patch('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string; serviceAccountUser?: string; serviceAccountPassword?: string } = {};
+    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string } = {};
     if (req.body?.quantDistributionEmail !== undefined) patch.quantDistributionEmail = String(req.body.quantDistributionEmail).trim();
     if (req.body?.jiraEpicKey !== undefined) patch.jiraEpicKey = String(req.body.jiraEpicKey).trim();
-    if (req.body?.serviceAccountUser !== undefined) patch.serviceAccountUser = String(req.body.serviceAccountUser).trim();
-    if (req.body?.serviceAccountPassword !== undefined) patch.serviceAccountPassword = String(req.body.serviceAccountPassword);
-    res.json(toPublicSettings(await deps.settings.update(patch)));
+    res.json(settingsView(await deps.settings.update(patch)));
   }));
 
   // --- Instances -----------------------------------------------------------
