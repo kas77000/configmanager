@@ -141,7 +141,8 @@ h3 { font-size: 13px; }
 .btn-ghost { border-color: transparent; background: transparent; color: var(--muted); }
 .btn-ghost:hover { background: var(--raised); color: var(--text); }
 .btn-danger { border-color: var(--error); color: var(--error); background: transparent; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn:disabled { opacity: 0.45; cursor: not-allowed; pointer-events: none; }
+.tip:has(.btn:disabled) { cursor: not-allowed; }
 .btn-sm { height: 26px; padding: 0 9px; font-size: 12px; }
 
 /* ---- Panels & tables ---- */
@@ -235,6 +236,27 @@ textarea.input { resize: vertical; min-height: 64px; }
 .banner.error { border-color: var(--error); color: var(--error); background: color-mix(in oklch, var(--error) 8%, transparent); }
 .banner.warning { border-color: var(--warning); color: var(--warning); background: color-mix(in oklch, var(--warning) 8%, transparent); }
 .banner.info { border-color: var(--info); color: var(--info); background: color-mix(in oklch, var(--info) 8%, transparent); }
+
+/* ---- Tooltips / info popovers ---- */
+.tip { position: relative; display: inline-flex; align-items: center; }
+.tip-icon { width: 14px; height: 14px; color: var(--faint); cursor: help; vertical-align: middle; }
+.tip:hover .tip-icon, .tip:focus-visible .tip-icon { color: var(--accent); }
+.tip:focus-visible { outline: none; }
+.tip-pop {
+  position: absolute; bottom: calc(100% + 9px); left: 50%;
+  transform: translateX(-50%) translateY(4px);
+  min-width: 160px; max-width: 280px; width: max-content;
+  background: var(--raised); color: var(--text); font-size: 12px; font-weight: 400; line-height: 1.5;
+  text-align: left; white-space: normal; padding: 8px 11px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius);
+  box-shadow: 0 8px 24px oklch(0.15 0 0 / 0.28);
+  opacity: 0; visibility: hidden; pointer-events: none; z-index: 100;
+  transition: opacity 150ms var(--ease), transform 150ms var(--ease);
+}
+.tip:hover .tip-pop, .tip:focus-within .tip-pop { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+.tip-pop::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--border-strong); }
+.tip-pop ul { margin: 4px 0 0; padding-left: 16px; }
+.tip-pop li { margin: 1px 0; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

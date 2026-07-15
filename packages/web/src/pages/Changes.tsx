@@ -1,7 +1,7 @@
 import { useMemo, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { canEdit, api, type Change, type InstanceInfo, type User } from '../api';
-import { Banner, ChangeStatusBadge, Skeleton, relTime } from '../components';
+import { Banner, ChangeStatusBadge, InfoTip, Skeleton, Tooltip, relTime } from '../components';
 import { IconBranch, IconPlus, IconX } from '../icons';
 
 export default function Changes({ me }: { me: User | null }) {
@@ -105,6 +105,12 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
   const valid = title.trim().length > 0 && effectiveDate.length > 0 && items.length > 0 &&
     items.every((it) => it.file && it.description.trim() && it.instances.length > 0);
 
+  const missing: string[] = [];
+  if (!title.trim()) missing.push('Change title');
+  if (!effectiveDate) missing.push('Effective date');
+  if (items.some((it) => !it.file || !it.description.trim() || it.instances.length === 0)) missing.push('Each modification needs a file, a description, and an instance');
+  const missingTip = missing.length ? <>Still needed:<ul>{missing.map((m) => <li key={m}>{m}</li>)}</ul></> : undefined;
+
   async function submit() {
     setBusy(true); setErr(null);
     try {
@@ -122,14 +128,12 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
       <div className="stack" style={{ gap: 24 }}>
         <div className="hstack" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <label style={{ display: 'block', flex: 1, minWidth: 300 }}>
-            <span style={label}>Change title</span>
+            <span style={label}>Change title <InfoTip text="A short name for the whole change. Each file gets its own description in the modifications below." /></span>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout: restrict Post layering" />
-            <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>A short name for the whole change. Each file gets its own description below.</span>
           </label>
           <label style={{ display: 'block', flex: '0 0 190px' }}>
-            <span style={label}>Effective date</span>
+            <span style={label}>Effective date <InfoTip text="The date this change takes effect for trading. It appears in the approval and recap emails." /></span>
             <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
-            <span className="faint" style={{ fontSize: 12, marginTop: 6, display: 'block' }}>When it takes effect for trading.</span>
           </label>
         </div>
 
@@ -184,9 +188,10 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
         {err && <Banner kind="error">{err}</Banner>}
 
         <div className="hstack" style={{ gap: 10, borderTop: '1px solid var(--border)', paddingTop: 18 }}>
-          <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Create change</button>
+          <Tooltip content={!busy ? missingTip : undefined}>
+            <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Create change</button>
+          </Tooltip>
           <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-          {!valid && !busy && <span className="faint" style={{ fontSize: 12 }}>Give the change a title and effective date, and each modification a file, a description, and at least one instance.</span>}
         </div>
       </div>
     </div>

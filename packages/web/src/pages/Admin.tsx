@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, isAdmin, type Environment, type InstanceInfo, type User } from '../api';
-import { Skeleton } from '../components';
+import { InfoTip, Skeleton, Tooltip } from '../components';
 import { IconChevron, IconPlus, IconTrash, IconX } from '../icons';
 
 export default function Admin({ me }: { me: User | null }) {
@@ -43,8 +43,11 @@ export default function Admin({ me }: { me: User | null }) {
 
       <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
         <div className="stack" style={{ gap: 8 }}>
-          <div className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Service account</span>
+          <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
+            <span className="hstack" style={{ gap: 5, fontWeight: 600, fontSize: 13 }}>
+              Service account
+              <InfoTip text={<>The account the app uses to reach the instances is configured on the server via the <span className="mono">.env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>). The password never leaves the server.</>} />
+            </span>
             {saConfigured
               ? <span className="badge success" style={{ fontSize: 11 }}>configured</span>
               : <span className="badge warning" style={{ fontSize: 11 }}>not configured</span>}
@@ -52,10 +55,6 @@ export default function Admin({ me }: { me: User | null }) {
           <div className="hstack" style={{ gap: 8 }}>
             <span className="faint" style={{ fontSize: 12, width: 110 }}>Username</span>
             <span className="mono" style={{ fontSize: 13 }}>{saUser || <span className="faint">not set</span>}</span>
-          </div>
-          <div className="faint" style={{ fontSize: 12 }}>
-            The account the app uses to reach the instances is configured on the server via the
-            <span className="mono"> .env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>). The password never leaves the server.
           </div>
         </div>
       </div>
@@ -192,7 +191,7 @@ function AddInstance({ instances, onDone, onError }: { instances: InstanceInfo[]
   const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!code.trim()) return onError('Instance code required.');
+    if (!code.trim()) return;
     setBusy(true);
     try {
       await api.createInstance({ code: code.trim().toUpperCase(), environment, uat, copyFrom: copyFrom || undefined });
@@ -229,7 +228,9 @@ function AddInstance({ instances, onDone, onError }: { instances: InstanceInfo[]
         </label>
       </div>
       <div className="hstack" style={{ marginTop: 12 }}>
-        <button className="btn btn-primary" onClick={submit} disabled={busy}>{busy ? <span className="spinner" /> : <IconPlus />}Create</button>
+        <Tooltip content={!code.trim() && !busy ? 'Enter an instance code first' : undefined}>
+          <button className="btn btn-primary" onClick={submit} disabled={busy || !code.trim()}>{busy ? <span className="spinner" /> : <IconPlus />}Create</button>
+        </Tooltip>
         <button className="btn btn-ghost" onClick={onDone}>Cancel</button>
       </div>
     </div>

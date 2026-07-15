@@ -2,6 +2,22 @@ import type { ReactNode } from 'react';
 import type { ChangeStatus, Finding, InstanceInfo } from './api';
 import { IconAlertTriangle, IconDiamond, IconInfo } from './icons';
 
+/** Wraps a trigger; shows `content` as a hover/focus popover. No content = passthrough. */
+export function Tooltip({ content, children }: { content?: ReactNode; children: ReactNode }) {
+  if (content === undefined || content === null || content === false) return <>{children}</>;
+  return <span className="tip">{children}<span className="tip-pop" role="tooltip">{content}</span></span>;
+}
+
+/** Small info icon that reveals `text` on hover/focus. */
+export function InfoTip({ text }: { text: ReactNode }) {
+  return (
+    <span className="tip" tabIndex={0} aria-label="More information">
+      <IconInfo className="tip-icon" />
+      <span className="tip-pop" role="tooltip">{text}</span>
+    </span>
+  );
+}
+
 export function ChangeStatusBadge({ status }: { status: ChangeStatus }) {
   const map: Record<ChangeStatus, string> = {
     draft: 'neutral', submitted: 'info', approved: 'success', rejected: 'error', merged: 'success', cancelled: 'neutral',

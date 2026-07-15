@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ROLES, ROLE_LABEL, api, isAdmin, roleSummary, type Role, type User } from '../api';
-import { Skeleton } from '../components';
+import { InfoTip, Skeleton, Tooltip } from '../components';
 import { IconPlus, IconTrash } from '../icons';
 
 export default function People({ me }: { me: User | null }) {
@@ -49,14 +49,12 @@ export default function People({ me }: { me: User | null }) {
       <div className="panel" style={{ padding: 16, marginBottom: 20 }}>
         <div className="stack" style={{ gap: 12 }}>
           <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>Quant distribution email</span>
+            <span className="hstack" style={{ gap: 5, fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>Quant distribution email <InfoTip text="CC'd on every approval-request email so the quant team is kept in the loop." /></span>
             <input className="input" style={{ maxWidth: 320 }} value={dist} onChange={(e) => setDist(e.target.value)} placeholder="quant-team@firm.com" />
-            <span className="faint" style={{ fontSize: 12 }}>CC'd on every approval-request email.</span>
           </label>
           <label className="hstack" style={{ gap: 10, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>JIRA epic</span>
+            <span className="hstack" style={{ gap: 5, fontSize: 12, color: 'var(--text)', fontWeight: 600, width: 150 }}>JIRA epic <InfoTip text="Config-change tickets are created under this epic (set as the issue's parent)." /></span>
             <input className="input mono" style={{ maxWidth: 320 }} value={epic} onChange={(e) => setEpic(e.target.value)} placeholder="BSGPTALGO-550" />
-            <span className="faint" style={{ fontSize: 12 }}>Config-change tickets are created under this epic.</span>
           </label>
           <div><button className="btn btn-sm" disabled={!settingsDirty} onClick={saveSettings}>Save settings</button></div>
         </div>
@@ -130,6 +128,11 @@ function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: strin
   }
 
   const valid = windowsId.trim().length > 0 && displayName.trim().length > 0 && email.trim().length > 0;
+  const missing: string[] = [];
+  if (!windowsId.trim()) missing.push('Windows ID');
+  if (!displayName.trim()) missing.push('Name');
+  if (!email.trim()) missing.push('Email');
+  const missingTip = missing.length ? <>Still needed:<ul>{missing.map((m) => <li key={m}>{m}</li>)}</ul></> : undefined;
 
   async function submit() {
     if (!valid) return;
@@ -156,10 +159,9 @@ function AddPerson({ onDone, onError }: { onDone: () => void; onError: (m: strin
           ))}
           <span className="faint" style={{ fontSize: 12 }}>{roleSummary(roles)}</span>
         </div>
-        <div className="hstack">
-          {!valid && <span className="faint" style={{ fontSize: 12 }}>Windows ID, name, and email are required.</span>}
+        <Tooltip content={!busy ? missingTip : undefined}>
           <button className="btn btn-primary" onClick={submit} disabled={busy || !valid}>{busy ? <span className="spinner" /> : <IconPlus />}Add person</button>
-        </div>
+        </Tooltip>
       </div>
     </div>
   );
