@@ -78,10 +78,18 @@ function ChangeRow({ c }: { c: Change }) {
 
 interface DraftItem { file: string; description: string; instances: string[] }
 
+/** The next business day (skips Saturday/Sunday), as YYYY-MM-DD in local time. */
+function nextBusinessDay(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  while (d.getDay() === 0 || d.getDay() === 6) d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCancel: () => void }) {
   const nav = useNavigate();
   const [title, setTitle] = useState('');
-  const [effectiveDate, setEffectiveDate] = useState('');
+  const [effectiveDate, setEffectiveDate] = useState(nextBusinessDay);
   const [items, setItems] = useState<DraftItem[]>([{ file: '', description: '', instances: [] }]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
