@@ -128,11 +128,11 @@ function NewChange({ instances, onCancel }: { instances: InstanceInfo[]; onCance
       <div className="stack" style={{ gap: 24 }}>
         <div className="hstack" style={{ gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
           <label style={{ display: 'block', flex: 1, minWidth: 300 }}>
-            <span style={label}>Change title <InfoTip text="A short name for the whole change. Each file gets its own description in the modifications below." /></span>
+            <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 6 }}>Change title <InfoTip text="A short name for the whole change. Each file gets its own description in the modifications below." /></span>
             <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Korea rollout: restrict Post layering" />
           </label>
           <label style={{ display: 'block', flex: '0 0 190px' }}>
-            <span style={label}>Effective date <InfoTip text="The date this change takes effect for trading. It appears in the approval and recap emails." /></span>
+            <span style={{ ...label, display: 'flex', alignItems: 'center', gap: 6 }}>Effective date <InfoTip text="The date this change takes effect for trading. It appears in the approval and recap emails." /></span>
             <input className="input" type="date" value={effectiveDate} onChange={(e) => setEffectiveDate(e.target.value)} />
           </label>
         </div>

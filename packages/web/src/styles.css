@@ -238,8 +238,8 @@ textarea.input { resize: vertical; min-height: 64px; }
 .banner.info { border-color: var(--info); color: var(--info); background: color-mix(in oklch, var(--info) 8%, transparent); }
 
 /* ---- Tooltips / info popovers ---- */
-.tip { position: relative; display: inline-flex; align-items: center; }
-.tip-icon { width: 14px; height: 14px; color: var(--faint); cursor: help; vertical-align: middle; }
+.tip { position: relative; display: inline-flex; align-items: center; vertical-align: middle; }
+.tip-icon { width: 14px; height: 14px; display: block; color: var(--faint); cursor: help; }
 .tip:hover .tip-icon, .tip:focus-visible .tip-icon { color: var(--accent); }
 .tip:focus-visible { outline: none; }
 .tip-pop {
@@ -257,6 +257,7 @@ textarea.input { resize: vertical; min-height: 64px; }
 .tip-pop::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: var(--border-strong); }
 .tip-pop ul { margin: 4px 0 0; padding-left: 16px; }
 .tip-pop li { margin: 1px 0; }
+.setting-label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
