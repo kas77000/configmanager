@@ -215,11 +215,17 @@ textarea.input { resize: vertical; min-height: 64px; }
 .chip.op { color: var(--accent); }
 
 /* ---- Diff ---- */
-.diff { font-family: var(--font-mono); font-size: 12px; white-space: pre; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
-.diff .ln { display: block; padding: 0 12px; }
+.diff { font-family: var(--font-mono); font-size: 12px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.diff .drow { display: flex; align-items: flex-start; min-height: 17px; }
+.diff .dgut { flex: none; width: 38px; padding: 0 8px; text-align: right; color: var(--faint); user-select: none; -webkit-user-select: none; }
+.diff .dgut.g2 { border-right: 1px solid var(--border); }
+.diff .dmark { flex: none; width: 18px; text-align: center; color: var(--faint); user-select: none; -webkit-user-select: none; }
+.diff .dcode { flex: 1; padding: 0 10px 0 4px; white-space: pre; }
 .diff .add { background: color-mix(in oklch, var(--success) 14%, transparent); }
 .diff .del { background: color-mix(in oklch, var(--error) 14%, transparent); }
-.diff .hunk { color: var(--info); }
+.diff .add .dmark { color: var(--success); }
+.diff .del .dmark { color: var(--error); }
+.diff-gap { padding: 3px 12px; color: var(--faint); background: color-mix(in oklch, var(--border) 16%, transparent); border-block: 1px solid var(--border); letter-spacing: 3px; user-select: none; -webkit-user-select: none; }
 
 /* ---- misc ---- */
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -258,6 +264,23 @@ textarea.input { resize: vertical; min-height: 64px; }
 .tip-pop ul { margin: 4px 0 0; padding-left: 16px; }
 .tip-pop li { margin: 1px 0; }
 .setting-label { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; }
+
+/* ---- Dropdown menu ---- */
+.menu { position: relative; display: inline-flex; }
+.menu > .btn { gap: 5px; }
+.menu-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 100;
+  min-width: 170px; padding: 5px; display: flex; flex-direction: column; gap: 2px;
+  background: var(--raised); border: 1px solid var(--border-strong); border-radius: var(--radius);
+  box-shadow: 0 8px 24px oklch(0.15 0 0 / 0.28);
+}
+.menu-item {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  padding: 7px 10px; font-size: 13px; color: var(--text);
+  background: none; border: 0; border-radius: var(--radius-sm);
+}
+.menu-item:hover:not(:disabled) { background: var(--surface); color: var(--accent); }
+.menu-item:disabled { opacity: 0.5; cursor: not-allowed; }
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }

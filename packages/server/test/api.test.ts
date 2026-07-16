@@ -257,17 +257,28 @@ describe('API (per-instance)', () => {
     await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
     await ed('post', `/api/changes/${id}/submit`).expect(200);
 
-    const approved = await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
-    expect(approved.body.jiraTickets).toHaveLength(2);
-    expect(approved.body.jiraTickets.map((t: { file: string }) => t.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
-    expect(approved.body.jiraTickets[0].key).toMatch(/^CFG-\d+$/);
-
+    // The approval draft is available once the change is submitted (awaiting approval).
     const eml = await ed('get', `/api/changes/${id}/email/approval`).expect(200);
     expect(eml.headers['content-type']).toContain('message/rfc822');
     expect(eml.text).toContain('X-Unsent: 1');
     expect(eml.text).toContain('boss@x');
     expect(eml.text).toContain('Newly applies to instances');
     expect(eml.text).toContain('risk.properties');
+
+    const approved = await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
+    expect(approved.body.jiraTickets).toHaveLength(2);
+    expect(approved.body.jiraTickets.map((t: { file: string }) => t.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
+    expect(approved.body.jiraTickets[0].key).toMatch(/^CFG-\d+$/);
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('refuses the approval draft until the change is submitted for approval', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('get', `/api/changes/${id}/email/approval`).expect(409); // still a draft
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
+    await ed('get', `/api/changes/${id}/email/approval`).expect(200);
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -299,6 +310,7 @@ describe('API (per-instance)', () => {
     await as(h.app, 'root')('patch', '/api/settings').send({ quantDistributionEmail: 'quant-team@firm.com' }).expect(200);
     const ed = as(h.app, 'ed');
     const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
     const eml = await ed('get', `/api/changes/${id}/email/approval`).expect(200);
     expect(eml.text).toContain('Cc: quant-team@firm.com');
     await rm(h.dir, { recursive: true, force: true });

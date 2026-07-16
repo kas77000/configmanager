@@ -404,6 +404,9 @@ export function createApp(deps: AppDeps): Express {
     if (!change) { res.status(404).json({ error: 'change not found' }); return; }
     const kind = req.params.kind;
     if (kind !== 'approval' && kind !== 'recap') { res.status(404).json({ error: 'unknown email kind' }); return; }
+    // The approval draft only exists while the change is awaiting approval; the recap only after it is merged.
+    if (kind === 'approval' && change.status !== 'submitted') { res.status(409).json({ error: 'The approval email is only available once the change is submitted for approval.' }); return; }
+    if (kind === 'recap' && change.status !== 'merged') { res.status(409).json({ error: 'The recap email is only available after the change is merged.' }); return; }
     const recipients = (await users.list()).filter((u) => canApprove(u.roles) && u.email).map((u) => u.email);
     const distro = (await deps.settings.get()).quantDistributionEmail;
     const sender = requireUser(req).displayName || requireUser(req).windowsId;

@@ -4,7 +4,7 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { KNOWN_FIELDS, analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
 import { ApiError, canApprove, canEdit, isAdmin, api, downloadEml, type Change, type ChangeTarget, type Gate, type User } from '../api';
-import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Skeleton, relTime } from '../components';
+import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Menu, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
 import { IconCheck, IconMerge, IconPlus, IconX } from '../icons';
 
@@ -101,12 +101,19 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
           {change.decision && <span className="faint" style={{ fontSize: 12 }}>{change.decision.action} by <span className="mono">{change.decision.by}</span> · {relTime(change.decision.at)}{change.decision.reason ? ` · "${change.decision.reason}"` : ''}</span>}
         </div>
         <div className="hstack" style={{ flexWrap: 'wrap' }}>
-          {requester && (change.status === 'draft' || change.status === 'submitted' || change.status === 'rejected') &&
-            <button className="btn btn-sm" disabled={busy} onClick={() => act(downloadEml(change.id, 'approval'))} title="Opens a pre-filled Outlook draft to send to approvers">Approval email…</button>}
-          {requester && change.status === 'merged' &&
-            <button className="btn btn-sm" disabled={busy} onClick={() => act(downloadEml(change.id, 'recap'))} title="Opens a pre-filled Outlook recap draft">Recap email…</button>}
           {canSubmit && <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(api.submitChange(change.id))}>Submit for approval</button>}
           {requester && change.status === 'draft' && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(api.cancelChange(change.id))}>Cancel change</button>}
+          {/* Email drafts live in a menu that only exists once the change is in an emailable state. */}
+          {requester && change.status === 'submitted' && (
+            <Menu label="Emails">
+              <button type="button" className="menu-item" disabled={busy} onClick={() => act(downloadEml(change.id, 'approval'))}>Approval email…</button>
+            </Menu>
+          )}
+          {requester && change.status === 'merged' && (
+            <Menu label="Emails">
+              <button type="button" className="menu-item" disabled={busy} onClick={() => act(downloadEml(change.id, 'recap'))}>Recap email…</button>
+            </Menu>
+          )}
           {canDecide && <button className="btn btn-sm" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} disabled={busy} onClick={() => act(api.approveChange(change.id))}><IconCheck style={{ width: 14, height: 14 }} />Approve</button>}
           {canDecide && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setRejecting((v) => !v)}>Reject</button>}
         </div>

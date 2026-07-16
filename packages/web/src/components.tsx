@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { ChangeStatus, Finding, InstanceInfo } from './api';
-import { IconAlertTriangle, IconDiamond, IconInfo } from './icons';
+import { IconAlertTriangle, IconChevron, IconDiamond, IconInfo } from './icons';
 
 /** Wraps a trigger; shows `content` as a hover/focus popover. No content = passthrough. */
 export function Tooltip({ content, children }: { content?: ReactNode; children: ReactNode }) {
@@ -14,6 +14,26 @@ export function InfoTip({ text }: { text: ReactNode }) {
     <span className="tip" tabIndex={0} aria-label="More information">
       <IconInfo className="tip-icon" />
       <span className="tip-pop" role="tooltip">{text}</span>
+    </span>
+  );
+}
+
+/** A small button that reveals a dropdown of actions. Closes on outside click or after a choice. */
+export function Menu({ label, children }: { label: ReactNode; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', onDoc);
+    return () => document.removeEventListener('mousedown', onDoc);
+  }, [open]);
+  return (
+    <span className="menu" ref={ref}>
+      <button type="button" className="btn btn-sm" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        {label}<IconChevron style={{ width: 12, height: 12, transform: open ? 'rotate(-90deg)' : 'rotate(90deg)', transition: 'transform 150ms var(--ease)' }} />
+      </button>
+      {open && <div className="menu-pop" role="menu" onClick={() => setOpen(false)}>{children}</div>}
     </span>
   );
 }
@@ -82,24 +102,56 @@ export function Skeleton({ rows = 4 }: { rows?: number }) {
   );
 }
 
-// Strip git's plumbing lines so only the actual content changes show.
-function isNoise(l: string): boolean {
+// Git plumbing lines that carry no file content (and no line-number meaning).
+function isPlumbing(l: string): boolean {
   return l.startsWith('diff --git ') || l.startsWith('index ') || l.startsWith('--- ') ||
-    l.startsWith('+++ ') || l.startsWith('@@') || l.startsWith('new file mode ') ||
-    l.startsWith('deleted file mode ') || l.startsWith('similarity index ') ||
-    l.startsWith('rename from ') || l.startsWith('rename to ') || l.startsWith('\\ No newline');
+    l.startsWith('+++ ') || l.startsWith('new file mode ') || l.startsWith('deleted file mode ') ||
+    l.startsWith('similarity index ') || l.startsWith('rename from ') || l.startsWith('rename to ') ||
+    l.startsWith('\\ No newline');
+}
+
+type DiffRow =
+  | { kind: 'gap' }
+  | { kind: 'add' | 'del' | 'ctx'; oldLn?: number; newLn?: number; text: string };
+
+// Parse a unified diff into rows carrying old/new line numbers. Hunk headers
+// (@@ -a,b +c,d @@) reset the counters; a break between hunks becomes a 'gap'.
+function parseDiff(patch: string): DiffRow[] {
+  const rows: DiffRow[] = [];
+  let oldLn = 0, newLn = 0, seenHunk = false;
+  for (const raw of patch.split('\n')) {
+    if (raw.startsWith('@@')) {
+      const m = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+      if (m) { oldLn = Number(m[1]); newLn = Number(m[2]); }
+      if (seenHunk) rows.push({ kind: 'gap' });
+      seenHunk = true;
+      continue;
+    }
+    if (isPlumbing(raw) || raw === '') continue;
+    if (raw.startsWith('+')) rows.push({ kind: 'add', newLn: newLn++, text: raw.slice(1) });
+    else if (raw.startsWith('-')) rows.push({ kind: 'del', oldLn: oldLn++, text: raw.slice(1) });
+    else rows.push({ kind: 'ctx', oldLn: oldLn++, newLn: newLn++, text: raw.startsWith(' ') ? raw.slice(1) : raw });
+  }
+  return rows;
 }
 
 export function DiffLines({ patch, maxHeight = 360 }: { patch: string; maxHeight?: number }) {
-  const lines = patch.split('\n').filter((l) => !isNoise(l));
-  if (lines.every((l) => l.trim() === '')) return <div className="empty">No content changes.</div>;
+  const rows = parseDiff(patch);
+  if (!rows.some((r) => r.kind === 'add' || r.kind === 'del')) return <div className="empty">No content changes.</div>;
   return (
-    <div className="diff" style={{ padding: '8px 0', maxHeight }}>
-      {lines.map((l, i) => {
-        const cls = l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : '';
-        // show the changed content without the leading +/- marker
-        const text = cls ? l.slice(1) : l;
-        return <span key={i} className={`ln ${cls}`}>{text || ' '}</span>;
+    <div className="diff" style={{ maxHeight }}>
+      {rows.map((r, i) => {
+        if (r.kind === 'gap') return <div key={i} className="diff-gap">⋯</div>;
+        const cls = r.kind === 'add' ? 'add' : r.kind === 'del' ? 'del' : '';
+        const mark = r.kind === 'add' ? '+' : r.kind === 'del' ? '-' : ' ';
+        return (
+          <div key={i} className={`drow ${cls}`}>
+            <span className="dgut">{r.oldLn ?? ''}</span>
+            <span className="dgut g2">{r.newLn ?? ''}</span>
+            <span className="dmark">{mark}</span>
+            <span className="dcode">{r.text || ' '}</span>
+          </div>
+        );
       })}
     </div>
   );
