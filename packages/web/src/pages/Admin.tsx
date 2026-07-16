@@ -10,6 +10,16 @@ const LOCATION_PLACEHOLDER: Record<LocationType, string> = {
   server: 'api-a.firm.com',
 };
 
+/** Joins an instance location with a file's relative path, inferring the separator from the base. */
+function joinLocation(base: string, rel: string): string {
+  const b = base.trim().replace(/[\\/]+$/, '');
+  const r = rel.trim().replace(/^[\\/]+/, '');
+  if (!b) return r;
+  if (!r) return b;
+  const sep = /\\/.test(b) || /^[a-zA-Z]:/.test(b) ? '\\' : '/';
+  return `${b}${sep}${r}`;
+}
+
 /** Best-effort folder picker: returns the chosen folder's name (browsers can't expose a full path).
  *  Uses the File System Access API when available, else a directory <input> fallback. */
 async function pickFolder(): Promise<string | null> {
@@ -72,7 +82,7 @@ export default function Admin({ me }: { me: User | null }) {
           <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
             <span className="hstack" style={{ gap: 5, fontWeight: 600, fontSize: 13 }}>
               Service account
-              <InfoTip text={<>The account the app uses to reach the instances is configured on the server via the <span className="mono">.env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>). The password never leaves the server.</>} />
+              <InfoTip text={<>Used to connect to <strong>server</strong>-type instances. Local folders and shared drives are read directly, without it. Configured on the server via the <span className="mono">.env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>); the password never leaves the server.</>} />
             </span>
             {saConfigured
               ? <span className="badge success" style={{ fontSize: 11 }}>configured</span>
@@ -82,6 +92,7 @@ export default function Admin({ me }: { me: User | null }) {
             <span className="faint" style={{ fontSize: 12, width: 110 }}>Username</span>
             <span className="mono" style={{ fontSize: 13 }}>{saUser || <span className="faint">not set</span>}</span>
           </div>
+          <div className="faint" style={{ fontSize: 12 }}>Used only to reach server-type instances. Local folders and shared drives need no credentials.</div>
         </div>
       </div>
 
@@ -105,7 +116,7 @@ export default function Admin({ me }: { me: User | null }) {
             </thead>
             <tbody>
               {instances.map((i) => (
-                <InstanceRow key={i.code} inst={i} run={run} />
+                <InstanceRow key={i.code} inst={i} run={run} sa={{ user: saUser, configured: saConfigured }} />
               ))}
             </tbody>
           </table>
@@ -115,7 +126,7 @@ export default function Admin({ me }: { me: User | null }) {
   );
 }
 
-function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>) => Promise<void> }) {
+function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promise<T>) => Promise<void>; sa: { user: string; configured: boolean } }) {
   const [addingFile, setAddingFile] = useState(false);
   const [fileName, setFileName] = useState('');
   const [confirmDel, setConfirmDel] = useState(false);
@@ -203,8 +214,22 @@ function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>
                     onClick={async () => { const name = await pickFolder(); if (name) { setServer(name); run(api.updateInstance(inst.code, { serverAddress: name })); } }}>Browse…</button>
                 )}
               </div>
-              {inst.files.length > 0 && <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths in this location</div>}
-              {inst.files.map((f) => <PathRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} run={run} />)}
+              <div className="hstack" style={{ gap: 8 }}>
+                <span className="faint" style={{ fontSize: 12, width: 120 }}>Access</span>
+                <span className="faint" style={{ fontSize: 12 }}>
+                  {locType === 'server'
+                    ? (sa.configured
+                        ? <>Connects via the service account <span className="mono">{sa.user}</span>.</>
+                        : <span style={{ color: 'var(--warning)' }}>Server access needs a service account — none is configured (set it in <span className="mono">.env</span>).</span>)
+                    : 'Read directly from this location — no service account needed.'}
+                </span>
+              </div>
+              {inst.files.length > 0 && (
+                <div className="faint" style={{ fontSize: 11 }}>
+                  <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths</span> — relative to the location; leave blank if the file sits directly in it.
+                </div>
+              )}
+              {inst.files.map((f) => <PathRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} base={server} run={run} />)}
             </div>
           </td>
         </tr>
@@ -213,14 +238,18 @@ function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>
   );
 }
 
-function PathRow({ code, file, path, run }: { code: string; file: string; path: string; run: <T>(p: Promise<T>) => Promise<void> }) {
+function PathRow({ code, file, path, base, run }: { code: string; file: string; path: string; base: string; run: <T>(p: Promise<T>) => Promise<void> }) {
   const [value, setValue] = useState(path);
+  const effective = joinLocation(base, value.trim() || file);
   return (
-    <label className="hstack" style={{ gap: 8 }}>
-      <span className="mono" style={{ fontSize: 12, width: 180, color: 'var(--muted)' }}>{file}</span>
-      <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder="path to this file within the location" value={value}
-        onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) run(api.setInstanceFilePath(code, file, value)); }} />
-    </label>
+    <div className="stack" style={{ gap: 3 }}>
+      <label className="hstack" style={{ gap: 8 }}>
+        <span className="mono" style={{ fontSize: 12, width: 180, color: 'var(--muted)' }}>{file}</span>
+        <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder={file} value={value}
+          onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) run(api.setInstanceFilePath(code, file, value)); }} />
+      </label>
+      <div className="faint mono" style={{ fontSize: 11, paddingLeft: 188, wordBreak: 'break-all' }}>→ {effective}</div>
+    </div>
   );
 }
 

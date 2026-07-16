@@ -20,7 +20,8 @@ export interface ManagedInstance {
   locationType?: LocationType;
   /** Where the config lives: a local path, a UNC share, or a server hostname. */
   serverAddress?: string;
-  /** Full path to each managed file, relative to the location above (filename -> path). */
+  /** Each managed file's path *relative to* the location above (filename -> relative path).
+   *  Blank/absent means the file sits directly in the location, under its own name. */
   paths?: Record<string, string>;
 }
 
@@ -28,6 +29,21 @@ const CODE_RE = /^[A-Za-z0-9_-]+$/;
 
 export function isValidInstanceCode(code: string): boolean {
   return CODE_RE.test(code);
+}
+
+/** True when reaching this instance requires the service account (server-hosted only, for now). */
+export function needsServiceAccount(inst: Pick<ManagedInstance, 'locationType'>): boolean {
+  return (inst.locationType ?? 'server') === 'server';
+}
+
+/** Effective path to a managed file: the instance location joined with the file's relative path,
+ *  defaulting to the file name when no relative path is set (so the base is never retyped). */
+export function resolveFilePath(inst: ManagedInstance, file: string): string {
+  const base = (inst.serverAddress ?? '').trim().replace(/[\\/]+$/, '');
+  const rel = ((inst.paths?.[file] ?? '').trim().replace(/^[\\/]+/, '')) || file;
+  if (!base) return rel;
+  const sep = /\\/.test(base) || /^[a-zA-Z]:/.test(base) ? '\\' : '/';
+  return `${base}${sep}${rel}`;
 }
 
 /** Persistent, admin-managed registry of instances and the files tracked for each. */
