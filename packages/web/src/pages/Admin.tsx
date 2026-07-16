@@ -20,21 +20,29 @@ function joinLocation(base: string, rel: string): string {
   return `${b}${sep}${r}`;
 }
 
-/** Best-effort folder picker: returns the chosen folder's name (browsers can't expose a full path).
- *  Uses the File System Access API when available, else a directory <input> fallback. */
-async function pickFolder(): Promise<string | null> {
-  const anyWin = window as unknown as { showDirectoryPicker?: () => Promise<{ name: string }> };
-  if (anyWin.showDirectoryPicker) {
-    try { return (await anyWin.showDirectoryPicker()).name; } catch { return null; /* cancelled */ }
+type PickResult = { ok: true; name: string } | { ok: false; reason: string };
+
+/** Best-effort folder picker. Browsers can't expose a full filesystem path, so this only ever
+ *  returns the chosen folder's NAME. Uses the File System Access API when available, else a
+ *  directory <input> fallback (which needs the folder to contain at least one file). */
+async function pickFolder(): Promise<PickResult> {
+  const w = window as unknown as { showDirectoryPicker?: () => Promise<{ name: string }> };
+  if (typeof w.showDirectoryPicker === 'function') {
+    try { return { ok: true, name: (await w.showDirectoryPicker()).name }; }
+    catch (e) { return { ok: false, reason: (e as DOMException)?.name === 'AbortError' ? '' : 'The folder picker was blocked by the browser.' }; }
   }
   return new Promise((resolve) => {
     const input = document.createElement('input');
     input.type = 'file';
     (input as unknown as { webkitdirectory: boolean }).webkitdirectory = true;
-    input.onchange = () => {
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    const done = (r: PickResult) => { input.remove(); resolve(r); };
+    input.addEventListener('change', () => {
       const rel = (input.files?.[0] as unknown as { webkitRelativePath?: string })?.webkitRelativePath ?? '';
-      resolve(rel ? rel.split('/')[0] : null);
-    };
+      done(rel ? { ok: true, name: rel.split('/')[0] } : { ok: false, reason: 'Could not read that folder (it may be empty). Type the path instead.' });
+    });
+    input.addEventListener('cancel', () => done({ ok: false, reason: '' }));
     input.click();
   });
 }
@@ -133,7 +141,20 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
   const [expanded, setExpanded] = useState(false);
   const [server, setServer] = useState(inst.serverAddress ?? '');
   const [locType, setLocType] = useState<LocationType>(inst.locationType ?? 'server');
+  const [browseMsg, setBrowseMsg] = useState('');
   const saveServer = () => { if (server !== (inst.serverAddress ?? '')) run(api.updateInstance(inst.code, { serverAddress: server })); };
+
+  async function browse() {
+    const r = await pickFolder();
+    if (r.ok) {
+      const full = joinLocation(server, r.name); // append the folder name to whatever's already typed
+      setServer(full);
+      setBrowseMsg(`Added folder "${r.name}". Complete the full path if needed, then click away to save.`);
+      run(api.updateInstance(inst.code, { serverAddress: full }));
+    } else if (r.reason) {
+      setBrowseMsg(r.reason);
+    }
+  }
 
   return (
     <>
@@ -210,10 +231,11 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
                 <input className="input mono" style={{ height: 28, flex: 1, minWidth: 220, maxWidth: 420 }} placeholder={LOCATION_PLACEHOLDER[locType]} value={server}
                   onChange={(e) => setServer(e.target.value)} onBlur={saveServer} />
                 {locType !== 'server' && (
-                  <button className="btn btn-sm" title="Pick a folder to fill its name; you may need to complete the full path"
-                    onClick={async () => { const name = await pickFolder(); if (name) { setServer(name); run(api.updateInstance(inst.code, { serverAddress: name })); } }}>Browse…</button>
+                  <button className="btn btn-sm" title="The browser only exposes the folder name, not its full path — you may need to complete it"
+                    onClick={browse}>Browse…</button>
                 )}
               </div>
+              {browseMsg && <div className="faint" style={{ fontSize: 12, paddingLeft: 128 }}>{browseMsg}</div>}
               <div className="hstack" style={{ gap: 8 }}>
                 <span className="faint" style={{ fontSize: 12, width: 120 }}>Access</span>
                 <span className="faint" style={{ fontSize: 12 }}>
