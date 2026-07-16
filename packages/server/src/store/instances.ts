@@ -2,11 +2,11 @@ import { JsonStore } from './json-store';
 
 export type Environment = 'pilot' | 'production';
 
-/** Where an instance's config lives: a local folder, a shared/network drive, or a server. */
-export type LocationType = 'local' | 'shared' | 'server';
-export const LOCATION_TYPES: LocationType[] = ['local', 'shared', 'server'];
+/** Where an instance's config lives: a shared/network drive, or a server. */
+export type LocationType = 'shared' | 'server';
+export const LOCATION_TYPES: LocationType[] = ['shared', 'server'];
 export function isLocationType(v: unknown): v is LocationType {
-  return v === 'local' || v === 'shared' || v === 'server';
+  return v === 'shared' || v === 'server';
 }
 
 export interface ManagedInstance {

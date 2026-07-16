@@ -3,9 +3,8 @@ import { api, isAdmin, type Environment, type InstanceInfo, type LocationType, t
 import { InfoTip, Skeleton, Tooltip } from '../components';
 import { IconChevron, IconPlus, IconTrash, IconX } from '../icons';
 
-const LOCATION_LABEL: Record<LocationType, string> = { local: 'Local folder', shared: 'Shared drive', server: 'Server' };
+const LOCATION_LABEL: Record<LocationType, string> = { shared: 'Shared drive', server: 'Server' };
 const LOCATION_PLACEHOLDER: Record<LocationType, string> = {
-  local: 'C:\\configs\\APIA',
   shared: '\\\\fileserver\\algo\\APIA',
   server: 'api-a.firm.com',
 };
@@ -90,7 +89,7 @@ export default function Admin({ me }: { me: User | null }) {
           <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
             <span className="hstack" style={{ gap: 5, fontWeight: 600, fontSize: 13 }}>
               Service account
-              <InfoTip text={<>Used to connect to <strong>server</strong>-type instances. Local folders and shared drives are read directly, without it. Configured on the server via the <span className="mono">.env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>); the password never leaves the server.</>} />
+              <InfoTip text={<>Used to connect to <strong>server</strong>-type instances. Shared drives are read directly, without it. Configured on the server via the <span className="mono">.env</span> file (<span className="mono">SERVICE_ACCOUNT_USER</span> and <span className="mono">SERVICE_ACCOUNT_PASSWORD</span>); the password never leaves the server.</>} />
             </span>
             {saConfigured
               ? <span className="badge success" style={{ fontSize: 11 }}>configured</span>
@@ -100,7 +99,7 @@ export default function Admin({ me }: { me: User | null }) {
             <span className="faint" style={{ fontSize: 12, width: 110 }}>Username</span>
             <span className="mono" style={{ fontSize: 13 }}>{saUser || <span className="faint">not set</span>}</span>
           </div>
-          <div className="faint" style={{ fontSize: 12 }}>Used only to reach server-type instances. Local folders and shared drives need no credentials.</div>
+          <div className="faint" style={{ fontSize: 12 }}>Used only to reach server-type instances. Shared drives need no credentials.</div>
         </div>
       </div>
 
@@ -221,7 +220,6 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
                 <span className="faint" style={{ fontSize: 12, width: 120 }}>Location type</span>
                 <select className="input" style={{ height: 28, padding: '0 8px', width: 160 }} value={locType}
                   onChange={(e) => { const v = e.target.value as LocationType; setLocType(v); run(api.updateInstance(inst.code, { locationType: v })); }}>
-                  <option value="local">{LOCATION_LABEL.local}</option>
                   <option value="shared">{LOCATION_LABEL.shared}</option>
                   <option value="server">{LOCATION_LABEL.server}</option>
                 </select>

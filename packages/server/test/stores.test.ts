@@ -44,10 +44,10 @@ describe('instance location', () => {
     ({ code: 'APIA', environment: 'production', uat: false, files: ['ai.fixmsg.properties'], ...over });
 
   it('resolves a file path from the location plus its relative path, defaulting to the file name', () => {
-    // local folder, no relative path -> location + file name
-    expect(resolveFilePath(base({ locationType: 'local', serverAddress: 'C:\\configs\\APIA' }), 'ai.fixmsg.properties'))
-      .toBe('C:\\configs\\APIA\\ai.fixmsg.properties');
-    // shared drive with a relative subpath (base is not retyped)
+    // mapped shared drive, no relative path -> location + file name
+    expect(resolveFilePath(base({ locationType: 'shared', serverAddress: 'Z:\\configs\\APIA' }), 'ai.fixmsg.properties'))
+      .toBe('Z:\\configs\\APIA\\ai.fixmsg.properties');
+    // UNC shared drive with a relative subpath (base is not retyped)
     expect(resolveFilePath(base({ locationType: 'shared', serverAddress: '\\\\fileserver\\algo\\APIA', paths: { 'ai.fixmsg.properties': 'config\\ai.fixmsg.properties' } }), 'ai.fixmsg.properties'))
       .toBe('\\\\fileserver\\algo\\APIA\\config\\ai.fixmsg.properties');
     // server host uses forward slashes
@@ -60,7 +60,6 @@ describe('instance location', () => {
   it('needs the service account only for server-type instances (unset defaults to server)', () => {
     expect(needsServiceAccount({ locationType: 'server' })).toBe(true);
     expect(needsServiceAccount({ locationType: undefined })).toBe(true);
-    expect(needsServiceAccount({ locationType: 'local' })).toBe(false);
     expect(needsServiceAccount({ locationType: 'shared' })).toBe(false);
   });
 });

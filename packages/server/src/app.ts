@@ -197,7 +197,7 @@ export function createApp(deps: AppDeps): Express {
     if (req.body?.uat !== undefined) patch.uat = req.body.uat === true;
     if (req.body?.serverAddress !== undefined) patch.serverAddress = String(req.body.serverAddress);
     if (req.body?.locationType !== undefined) {
-      if (!isLocationType(req.body.locationType)) { res.status(400).json({ error: 'locationType must be local|shared|server' }); return; }
+      if (!isLocationType(req.body.locationType)) { res.status(400).json({ error: 'locationType must be shared|server' }); return; }
       patch.locationType = req.body.locationType;
     }
     const updated = await instances.update(req.params.code, patch);

@@ -26,7 +26,7 @@ export function roleSummary(roles?: Role[]): string {
 }
 
 export type Environment = 'pilot' | 'production';
-export type LocationType = 'local' | 'shared' | 'server';
+export type LocationType = 'shared' | 'server';
 export interface InstanceInfo {
   code: string; environment: Environment; uat: boolean; files: string[];
   locationType?: LocationType; serverAddress?: string; paths?: Record<string, string>;
