@@ -2,6 +2,13 @@ import { JsonStore } from './json-store';
 
 export type Environment = 'pilot' | 'production';
 
+/** Where an instance's config lives: a local folder, a shared/network drive, or a server. */
+export type LocationType = 'local' | 'shared' | 'server';
+export const LOCATION_TYPES: LocationType[] = ['local', 'shared', 'server'];
+export function isLocationType(v: unknown): v is LocationType {
+  return v === 'local' || v === 'shared' || v === 'server';
+}
+
 export interface ManagedInstance {
   code: string;
   environment: Environment;
@@ -9,9 +16,11 @@ export interface ManagedInstance {
   uat: boolean;
   /** Config files managed for this instance. */
   files: string[];
-  /** Address of the server hosting this instance (hostname / share). */
+  /** How the instance's config is reached. Defaults to 'server' for existing instances. */
+  locationType?: LocationType;
+  /** Where the config lives: a local path, a UNC share, or a server hostname. */
   serverAddress?: string;
-  /** Full path to each managed file on the server (filename -> path). */
+  /** Full path to each managed file, relative to the location above (filename -> path). */
   paths?: Record<string, string>;
 }
 
@@ -47,7 +56,7 @@ export class InstanceStore {
     });
   }
 
-  async update(code: string, patch: Partial<Pick<ManagedInstance, 'environment' | 'uat' | 'serverAddress'>>): Promise<ManagedInstance | undefined> {
+  async update(code: string, patch: Partial<Pick<ManagedInstance, 'environment' | 'uat' | 'serverAddress' | 'locationType'>>): Promise<ManagedInstance | undefined> {
     return this.store.update((list) => {
       const inst = list.find((i) => i.code === code);
       if (!inst) return undefined;
@@ -55,6 +64,7 @@ export class InstanceStore {
       if (patch.environment) inst.environment = patch.environment;
       if (patch.uat !== undefined) inst.uat = patch.uat;
       if (patch.serverAddress !== undefined) inst.serverAddress = patch.serverAddress;
+      if (patch.locationType !== undefined) inst.locationType = patch.locationType;
       return { ...inst };
     });
   }

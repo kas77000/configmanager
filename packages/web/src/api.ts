@@ -26,9 +26,10 @@ export function roleSummary(roles?: Role[]): string {
 }
 
 export type Environment = 'pilot' | 'production';
+export type LocationType = 'local' | 'shared' | 'server';
 export interface InstanceInfo {
   code: string; environment: Environment; uat: boolean; files: string[];
-  serverAddress?: string; paths?: Record<string, string>;
+  locationType?: LocationType; serverAddress?: string; paths?: Record<string, string>;
 }
 export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; serviceAccountUser: string; serviceAccountConfigured: boolean; }
 export interface SettingsPatch { quantDistributionEmail?: string; jiraEpicKey?: string; }
@@ -113,7 +114,7 @@ export const api = {
   sync: (code: string) => req<DriftResult & { updated: boolean; commit?: string }>('POST', `/instances/${code}/sync`, {}),
 
   createInstance: (body: { code: string; environment: Environment; uat: boolean; copyFrom?: string }) => req<InstanceInfo>('POST', '/instances', body),
-  updateInstance: (code: string, patch: { environment?: Environment; uat?: boolean; serverAddress?: string }) => req<InstanceInfo>('PATCH', `/instances/${code}`, patch),
+  updateInstance: (code: string, patch: { environment?: Environment; uat?: boolean; serverAddress?: string; locationType?: LocationType }) => req<InstanceInfo>('PATCH', `/instances/${code}`, patch),
   deleteInstance: (code: string) => req<{ deleted: boolean }>('DELETE', `/instances/${code}`),
   addInstanceFile: (code: string, file: string, content?: string, path?: string) => req<InstanceInfo>('POST', `/instances/${code}/files`, { file, content, path }),
   setInstanceFilePath: (code: string, file: string, path: string) => req<InstanceInfo>('PATCH', `/instances/${code}/files/${encodeURIComponent(file)}`, { path }),

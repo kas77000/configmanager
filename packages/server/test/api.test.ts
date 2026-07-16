@@ -98,11 +98,12 @@ describe('API (per-instance)', () => {
     const cid = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIZ'] }).expect(201)).body.id;
     expect(cid).toBeTruthy();
 
-    // edit environment + make it the UAT box (moves UAT off APIH)
-    await admin('patch', '/api/instances/APIZ').send({ environment: 'production', uat: true }).expect(200);
+    // edit environment + make it the UAT box (moves UAT off APIH); set a shared-drive location
+    await admin('patch', '/api/instances/APIZ').send({ environment: 'production', uat: true, locationType: 'shared', serverAddress: '\\\\fileserver\\algo\\APIZ' }).expect(200);
+    await admin('patch', '/api/instances/APIZ').send({ locationType: 'nonsense' }).expect(400); // invalid type rejected
     const list = await admin('get', '/api/instances').expect(200);
     const byCode = Object.fromEntries(list.body.map((i: any) => [i.code, i]));
-    expect(byCode.APIZ).toMatchObject({ environment: 'production', uat: true });
+    expect(byCode.APIZ).toMatchObject({ environment: 'production', uat: true, locationType: 'shared', serverAddress: '\\\\fileserver\\algo\\APIZ' });
     expect(byCode.APIH.uat).toBe(false);
 
     // add a second managed file, committed onto the instance branch

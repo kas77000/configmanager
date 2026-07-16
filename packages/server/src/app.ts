@@ -3,7 +3,7 @@ import type { ConfigRepo } from './git/repo';
 import { ROLES, type Role, type UserDirectory, canApprove, canEdit, isAdmin } from './store/users';
 import type { AuditLog } from './store/audit';
 import type { Change, ChangeItem, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
-import { InstanceStore, isValidInstanceCode } from './store/instances';
+import { InstanceStore, isLocationType, isValidInstanceCode, type LocationType } from './store/instances';
 import type { JiraClient } from './jira';
 import type { ServiceAccount, SettingsStore } from './store/settings';
 import { approvalEmail, recapEmail, toEml } from './email';
@@ -189,13 +189,17 @@ export function createApp(deps: AppDeps): Express {
 
   api.patch('/instances/:code', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { environment?: 'pilot' | 'production'; uat?: boolean; serverAddress?: string } = {};
+    const patch: { environment?: 'pilot' | 'production'; uat?: boolean; serverAddress?: string; locationType?: LocationType } = {};
     if (req.body?.environment !== undefined) {
       if (req.body.environment !== 'pilot' && req.body.environment !== 'production') { res.status(400).json({ error: 'environment must be pilot|production' }); return; }
       patch.environment = req.body.environment;
     }
     if (req.body?.uat !== undefined) patch.uat = req.body.uat === true;
     if (req.body?.serverAddress !== undefined) patch.serverAddress = String(req.body.serverAddress);
+    if (req.body?.locationType !== undefined) {
+      if (!isLocationType(req.body.locationType)) { res.status(400).json({ error: 'locationType must be local|shared|server' }); return; }
+      patch.locationType = req.body.locationType;
+    }
     const updated = await instances.update(req.params.code, patch);
     if (!updated) { res.status(404).json({ error: 'instance not found' }); return; }
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'update-instance', branch: instanceBranch(req.params.code), details: patch });

@@ -1,7 +1,33 @@
 import { useEffect, useState } from 'react';
-import { api, isAdmin, type Environment, type InstanceInfo, type User } from '../api';
+import { api, isAdmin, type Environment, type InstanceInfo, type LocationType, type User } from '../api';
 import { InfoTip, Skeleton, Tooltip } from '../components';
 import { IconChevron, IconPlus, IconTrash, IconX } from '../icons';
+
+const LOCATION_LABEL: Record<LocationType, string> = { local: 'Local folder', shared: 'Shared drive', server: 'Server' };
+const LOCATION_PLACEHOLDER: Record<LocationType, string> = {
+  local: 'C:\\configs\\APIA',
+  shared: '\\\\fileserver\\algo\\APIA',
+  server: 'api-a.firm.com',
+};
+
+/** Best-effort folder picker: returns the chosen folder's name (browsers can't expose a full path).
+ *  Uses the File System Access API when available, else a directory <input> fallback. */
+async function pickFolder(): Promise<string | null> {
+  const anyWin = window as unknown as { showDirectoryPicker?: () => Promise<{ name: string }> };
+  if (anyWin.showDirectoryPicker) {
+    try { return (await anyWin.showDirectoryPicker()).name; } catch { return null; /* cancelled */ }
+  }
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    (input as unknown as { webkitdirectory: boolean }).webkitdirectory = true;
+    input.onchange = () => {
+      const rel = (input.files?.[0] as unknown as { webkitRelativePath?: string })?.webkitRelativePath ?? '';
+      resolve(rel ? rel.split('/')[0] : null);
+    };
+    input.click();
+  });
+}
 
 export default function Admin({ me }: { me: User | null }) {
   const [instances, setInstances] = useState<InstanceInfo[] | null>(null);
@@ -95,6 +121,8 @@ function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>
   const [confirmDel, setConfirmDel] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [server, setServer] = useState(inst.serverAddress ?? '');
+  const [locType, setLocType] = useState<LocationType>(inst.locationType ?? 'server');
+  const saveServer = () => { if (server !== (inst.serverAddress ?? '')) run(api.updateInstance(inst.code, { serverAddress: server })); };
 
   return (
     <>
@@ -158,11 +186,24 @@ function InstanceRow({ inst, run }: { inst: InstanceInfo; run: <T>(p: Promise<T>
           <td colSpan={5} style={{ background: 'var(--raised)' }}>
             <div className="stack" style={{ gap: 12, padding: '6px 4px 10px' }}>
               <label className="hstack" style={{ gap: 8 }}>
-                <span className="faint" style={{ fontSize: 12, width: 120 }}>Server address</span>
-                <input className="input mono" style={{ height: 28, maxWidth: 420 }} placeholder="\\APIA\config or api-a.firm.com" value={server}
-                  onChange={(e) => setServer(e.target.value)} onBlur={() => { if (server !== (inst.serverAddress ?? '')) run(api.updateInstance(inst.code, { serverAddress: server })); }} />
+                <span className="faint" style={{ fontSize: 12, width: 120 }}>Location type</span>
+                <select className="input" style={{ height: 28, padding: '0 8px', width: 160 }} value={locType}
+                  onChange={(e) => { const v = e.target.value as LocationType; setLocType(v); run(api.updateInstance(inst.code, { locationType: v })); }}>
+                  <option value="local">{LOCATION_LABEL.local}</option>
+                  <option value="shared">{LOCATION_LABEL.shared}</option>
+                  <option value="server">{LOCATION_LABEL.server}</option>
+                </select>
               </label>
-              {inst.files.length > 0 && <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths on the server</div>}
+              <div className="hstack" style={{ gap: 8, flexWrap: 'wrap' }}>
+                <span className="faint" style={{ fontSize: 12, width: 120 }}>{locType === 'server' ? 'Server address' : 'Location'}</span>
+                <input className="input mono" style={{ height: 28, flex: 1, minWidth: 220, maxWidth: 420 }} placeholder={LOCATION_PLACEHOLDER[locType]} value={server}
+                  onChange={(e) => setServer(e.target.value)} onBlur={saveServer} />
+                {locType !== 'server' && (
+                  <button className="btn btn-sm" title="Pick a folder to fill its name; you may need to complete the full path"
+                    onClick={async () => { const name = await pickFolder(); if (name) { setServer(name); run(api.updateInstance(inst.code, { serverAddress: name })); } }}>Browse…</button>
+                )}
+              </div>
+              {inst.files.length > 0 && <div className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths in this location</div>}
               {inst.files.map((f) => <PathRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} run={run} />)}
             </div>
           </td>
@@ -177,7 +218,7 @@ function PathRow({ code, file, path, run }: { code: string; file: string; path: 
   return (
     <label className="hstack" style={{ gap: 8 }}>
       <span className="mono" style={{ fontSize: 12, width: 180, color: 'var(--muted)' }}>{file}</span>
-      <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder="path to this file on the server" value={value}
+      <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder="path to this file within the location" value={value}
         onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) run(api.setInstanceFilePath(code, file, value)); }} />
     </label>
   );
