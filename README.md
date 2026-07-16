@@ -212,6 +212,66 @@ All variables are read from `.env` (or the real environment) by the server.
 
 ---
 
+## Resetting the data (start from scratch)
+
+Handy when testing: wipe the app's state and get a clean install back, while still ending up with an
+admin account.
+
+All state lives under `data/` (gitignored):
+
+| Path | Holds |
+|---|---|
+| `data/config-repo` | The Git repo with every instance's branches and history of the managed file(s). |
+| `data/users.json` | The user directory (Windows IDs + roles). |
+| `data/instances.json` | The instance registry (codes, environments, locations, file paths). |
+| `data/changes.json` | All changes (drafts, submitted, approved, merged…). |
+| `data/settings.json` | App settings (quant distribution email, Jira epic). |
+| `data/audit.json` | The audit log. |
+
+### Full reset
+
+1. **Stop the API server** (Ctrl-C in its terminal). Do this first, the server holds the state in
+   memory and rewrites these files, so deleting while it runs can be undone on the next write.
+2. **Delete the data directory:**
+   - Git Bash: `rm -rf data`
+   - PowerShell: `Remove-Item -Recurse -Force data`
+3. **Restart the API:** `npm run dev -w @config-manager/server`. On startup it re-seeds the instance
+   branches (from `configsMoc/ai.fixmsg.properties`, or a placeholder if that's missing) and the
+   default instances **APIA–APIM**. Users, changes, settings, and the audit log start empty.
+4. **Open the app.** The **first identity the server sees becomes Admin automatically**. In dev that's
+   your dev user (`cm.devUser` in the browser's `localStorage`, default `salavat`), so you have a fresh
+   admin account immediately, no manual step.
+
+### Reset only part of it (keep the rest)
+
+With the server stopped, delete just the file(s) you want to clear; each is re-created on the next
+start:
+
+| Delete | Result on next start |
+|---|---|
+| `data/users.json` | All users cleared → the next visitor becomes **Admin** again (re-triggers the admin bootstrap). Keeps instances, changes, and history. |
+| `data/changes.json` | All changes cleared; users, instances, and Git history kept. |
+| `data/instances.json` | Instance registry cleared → re-seeded to the defaults (APIA–APIM). |
+| `data/settings.json` | Settings reset to defaults (Jira epic `BSGPTALGO-550`). |
+| `data/audit.json` | Audit log cleared. |
+| `data/config-repo` | All Git history/branches cleared → re-seeded from the seed config. |
+
+### Choosing which admin you get
+
+The fresh admin is whoever hits the server first after the reset. To make that a specific person in
+dev, set the dev user **before** loading the app, for example in the browser console:
+
+```js
+localStorage.setItem('cm.devUser', 'yourWindowsId');
+```
+
+Then reload, that ID becomes the first user, and therefore the admin.
+
+> **Tip:** for repeated test cycles, deleting only `data/users.json` is the quickest "give me a clean
+> admin" reset, it keeps your instances and Git history intact but re-runs the admin bootstrap.
+
+---
+
 ## Project status
 
 This is a working prototype covering the full workflow end to end. Known stubs/simplifications for a
