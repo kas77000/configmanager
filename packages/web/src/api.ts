@@ -38,6 +38,8 @@ export interface ChangeItem { file: string; description: string; instances: stri
 export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
 export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
 export interface JiraTicket { file: string; key: string; url: string; }
+export interface JiraTemplateItem { file: string; instances: string[]; summary: string; description: string; }
+export interface JiraTemplate { epicKey: string; items: JiraTemplateItem[]; }
 export interface Change {
   id: string; description: string; effectiveDate?: string; items: ChangeItem[]; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
@@ -134,6 +136,8 @@ export const api = {
   submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),
   approveChange: (id: string) => req<Change>('POST', `/changes/${id}/approve`, {}),
   rejectChange: (id: string, reason: string) => req<Change>('POST', `/changes/${id}/reject`, { reason }),
+  jiraTemplate: (id: string) => req<JiraTemplate>('GET', `/changes/${id}/jira-template`),
+  setJira: (id: string, tickets: JiraTicket[]) => req<Change>('PUT', `/changes/${id}/jira`, { tickets }),
 
   changeFile: (id: string, code: string, file: string) =>
     req<{ instance: string; file: string; content: string }>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}`),

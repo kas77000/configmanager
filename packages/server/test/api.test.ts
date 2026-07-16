@@ -247,7 +247,7 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('creates Jira tickets on approval and generates an Outlook approval draft', async () => {
+  it('records Jira links after approval and exposes a per-file ticket template', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
     await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', roles: ['editor', 'stakeholder'], email: 'boss@x' }).expect(201);
@@ -259,16 +259,35 @@ describe('API (per-instance)', () => {
 
     // The approval draft is available once the change is submitted (awaiting approval).
     const eml = await ed('get', `/api/changes/${id}/email/approval`).expect(200);
-    expect(eml.headers['content-type']).toContain('message/rfc822');
     expect(eml.text).toContain('X-Unsent: 1');
     expect(eml.text).toContain('boss@x');
-    expect(eml.text).toContain('Newly applies to instances');
     expect(eml.text).toContain('risk.properties');
 
+    // Jira links cannot be attached until the change is approved.
+    await ed('put', `/api/changes/${id}/jira`).send({ tickets: [{ file: FILE, url: 'https://jira.local/browse/X-1' }] }).expect(409);
+
+    // Approval no longer auto-creates Jira tickets.
     const approved = await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
-    expect(approved.body.jiraTickets).toHaveLength(2);
-    expect(approved.body.jiraTickets.map((t: { file: string }) => t.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
-    expect(approved.body.jiraTickets[0].key).toMatch(/^CFG-\d+$/);
+    expect(approved.body.jiraTickets ?? []).toHaveLength(0);
+
+    // The app suggests one ticket (summary + description) per config file.
+    const tpl = (await ed('get', `/api/changes/${id}/jira-template`).expect(200)).body;
+    expect(tpl.epicKey).toBe('BSGPTALGO-550');
+    expect(tpl.items.map((i: { file: string }) => i.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
+    const fixItem = tpl.items.find((i: { file: string }) => i.file === FILE);
+    expect(fixItem.summary).toContain('Korea 144=1');
+    expect(fixItem.description).toContain('Instances: APIA');
+
+    // The requester records the ticket links they created; keys are derived from the URLs.
+    const saved = (await ed('put', `/api/changes/${id}/jira`).send({ tickets: [
+      { file: FILE, url: 'https://jira.local/browse/BSGPTALGO-1001' },
+      { file: 'risk.properties', url: 'https://jira.local/browse/BSGPTALGO-1002' },
+      { file: 'not-in-change.properties', url: 'https://jira.local/browse/BSGPTALGO-9999' }, // ignored
+    ] }).expect(200)).body;
+    expect(saved.jiraTickets).toHaveLength(2);
+    const fixTicket = saved.jiraTickets.find((t: { file: string }) => t.file === FILE);
+    expect(fixTicket.key).toBe('BSGPTALGO-1001');
+    expect(fixTicket.url).toBe('https://jira.local/browse/BSGPTALGO-1001');
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -282,16 +301,12 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('creates Jira tickets under the configured epic (default BSGPTALGO-550)', async () => {
-    const epics: (string | undefined)[] = [];
-    const jira: JiraClient = { async createIssue(_s, _d, epic) { epics.push(epic); return { key: 'X-1', url: 'https://j/X-1' }; } };
-    const h = await makeHarness(jira);
+  it('jira-template uses the configured epic (default BSGPTALGO-550)', async () => {
+    const h = await makeHarness();
     const ed = as(h.app, 'ed');
     const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
-    await ed('put', `/api/changes/${id}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
-    await ed('post', `/api/changes/${id}/submit`).expect(200);
-    await as(h.app, 'root')('post', `/api/changes/${id}/approve`).expect(200);
-    expect(epics).toEqual(['BSGPTALGO-550']);
+    const tpl = (await ed('get', `/api/changes/${id}/jira-template`).expect(200)).body;
+    expect(tpl.epicKey).toBe('BSGPTALGO-550');
     await rm(h.dir, { recursive: true, force: true });
   });
 

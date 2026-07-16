@@ -15,6 +15,36 @@ import { MANAGED_FILE, instanceBranch } from './config';
 
 const SERVICE_ACCOUNT = { name: 'Service Account', email: 'service-account@local' };
 
+/** Best-effort Jira issue key from a browse URL, e.g. ".../browse/BSGPTALGO-1234" -> "BSGPTALGO-1234". */
+function keyFromUrl(url: string): string {
+  let path = url;
+  try { path = new URL(url).pathname; } catch { /* not an absolute URL, use as-is */ }
+  const parts = path.split(/[/?#]/).filter(Boolean);
+  return parts[parts.length - 1] || url;
+}
+
+export interface JiraTemplateItem { file: string; instances: string[]; summary: string; description: string; }
+export interface JiraTemplate { epicKey: string; items: JiraTemplateItem[]; }
+
+/** Suggested Jira ticket content (one per config file) for the user to paste into Jira. */
+function buildJiraTemplate(change: Change, epicKey: string, appBaseUrl: string): JiraTemplate {
+  const files = [...new Set(change.targets.flatMap((t) => t.files))];
+  const items = files.map((file) => {
+    const instances = change.targets.filter((t) => t.files.includes(file)).map((t) => t.instance);
+    const details = change.items.filter((it) => it.file === file).map((it) => it.description).filter(Boolean);
+    const description = [
+      `Change ${change.id}: ${change.description}`,
+      `Config file: ${file}`,
+      `Instances: ${instances.join(', ')}`,
+      change.effectiveDate ? `Effective date: ${change.effectiveDate}` : null,
+      details.length ? `Details: ${details.join('; ')}` : null,
+      `Configuration Manager: ${appBaseUrl.replace(/\/$/, '')}/changes/${change.id}`,
+    ].filter(Boolean).join('\n');
+    return { file, instances, summary: `[Config] ${change.description} — ${file}`, description };
+  });
+  return { epicKey, items };
+}
+
 export interface AppDeps {
   repo: ConfigRepo;
   users: UserDirectory;
@@ -38,7 +68,7 @@ const wrap =
   };
 
 export function createApp(deps: AppDeps): Express {
-  const { repo, users, audit, changes, instances, reader, jira } = deps;
+  const { repo, users, audit, changes, instances, reader } = deps;
   const app = express();
   app.use(express.json({ limit: '5mb' }));
 
@@ -376,25 +406,41 @@ export function createApp(deps: AppDeps): Express {
     const change = await changes.decide(req.params.id, requireUser(req).windowsId, 'approved');
     if (!change) { res.status(404).json({ error: 'change not found' }); return; }
     if (change.status !== 'approved') { res.status(409).json({ error: 'change is not awaiting approval' }); return; }
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'approve-change', details: { changeId: change.id } });
+    res.json(change);
+  }));
 
-    // On approval, create one Jira ticket per config file. Jira failures never block approval.
-    const files = [...new Set(change.targets.flatMap((t) => t.files))];
-    const epic = (await deps.settings.get()).jiraEpicKey || undefined;
-    const tickets: JiraTicket[] = [];
-    for (const file of files) {
-      const targeted = change.targets.filter((t) => t.files.includes(file)).map((t) => t.instance);
-      try {
-        const { key, url } = await jira.createIssue(
-          `[Config] ${change.description} — ${file}`,
-          `Change ${change.id}\nFile: ${file}\nInstances: ${targeted.join(', ')}\n${deps.appBaseUrl}/changes/${change.id}`,
-          epic,
-        );
-        tickets.push({ file, key, url });
-      } catch { /* keep approval even if Jira is down */ }
+  // Suggested Jira ticket content (summary + description per config file) for the user to paste into Jira.
+  api.get('/changes/:id/jira-template', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
+    const change = await changes.get(req.params.id);
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    const epicKey = (await deps.settings.get()).jiraEpicKey || '';
+    res.json(buildJiraTemplate(change, epicKey, deps.appBaseUrl));
+  }));
+
+  // The requester records the Jira ticket link(s) they created (one per config file).
+  api.put('/changes/:id/jira', wrap(async (req, res) => {
+    if (!requireEdit(req, res)) return;
+    const change = await changes.get(req.params.id);
+    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
+    if (change.status !== 'approved' && change.status !== 'merged') {
+      res.status(409).json({ error: 'Jira tickets can be attached once the change is approved.' }); return;
     }
-    const finalChange = tickets.length ? await changes.setJiraTickets(change.id, tickets) : change;
-    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'approve-change', details: { changeId: change.id, jira: tickets.map((t) => t.key) } });
-    res.json(finalChange);
+    const validFiles = new Set(change.targets.flatMap((t) => t.files));
+    const raw: unknown[] = Array.isArray(req.body?.tickets) ? req.body.tickets : [];
+    const tickets: JiraTicket[] = [];
+    for (const t of raw) {
+      const rec = t as { file?: unknown; key?: unknown; url?: unknown };
+      const file = String(rec.file ?? '');
+      const url = String(rec.url ?? '').trim();
+      if (!validFiles.has(file) || !url) continue; // skip unknown files / blank links
+      const key = String(rec.key ?? '').trim() || keyFromUrl(url);
+      tickets.push({ file, key, url });
+    }
+    const updated = await changes.setJiraTickets(change.id, tickets);
+    await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'attach-jira', details: { changeId: change.id, jira: tickets.map((t) => t.key) } });
+    res.json(updated);
   }));
 
   // Downloadable Outlook draft (.eml with X-Unsent) for the approval request / recap.
