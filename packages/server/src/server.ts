@@ -24,7 +24,12 @@ export async function main(): Promise<void> {
   };
 
   const repo = new ConfigRepo(cfg.repoDir, MANAGED_FILE);
-  const seed = await readFile(cfg.seedFile, 'utf8');
+  // The seed file (a sample config, kept out of git under configsMoc/) is only used the
+  // first time the repo is initialized. If it is absent, fall back to a placeholder so a
+  // fresh clone still starts; a real config can be dropped into configsMoc/ later.
+  const seed = await readFile(cfg.seedFile, 'utf8').catch(
+    () => `# ${MANAGED_FILE}\n# Seed file not found at ${cfg.seedFile}.\n# Add your own config here (see configsMoc/) to seed instance branches.\n`,
+  );
   await seedRepo(repo, seed);
 
   const users = new UserDirectory(new JsonStore<User[]>(join(cfg.dataDir, 'users.json'), []));

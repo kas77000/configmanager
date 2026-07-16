@@ -76,7 +76,7 @@ const root = process.cwd();
 export const defaultConfig: ServerConfig = {
   repoDir: join(root, 'data', 'config-repo'),
   dataDir: join(root, 'data'),
-  seedFile: join(root, MANAGED_FILE),
+  seedFile: join(root, 'configsMoc', MANAGED_FILE),
   port: Number(process.env.PORT ?? 4000),
   appBaseUrl: process.env.APP_BASE_URL ?? 'http://localhost:5173',
 };
