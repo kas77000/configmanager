@@ -230,11 +230,16 @@ All state lives under `data/` (gitignored):
 
 ### Full reset
 
+Use the built-in reset script — no manual file deletion, and it works the same on Windows, macOS, and
+Linux:
+
 1. **Stop the API server** (Ctrl-C in its terminal). Do this first, the server holds the state in
    memory and rewrites these files, so deleting while it runs can be undone on the next write.
-2. **Delete the data directory:**
-   - Git Bash: `rm -rf data`
-   - PowerShell: `Remove-Item -Recurse -Force data`
+2. **Run the reset:**
+   ```bash
+   npm run reset
+   ```
+   This wipes the whole `data/` directory.
 3. **Restart the API:** `npm run dev -w @config-manager/server`. On startup it re-seeds the instance
    branches (from `configsMoc/ai.fixmsg.properties`, or a placeholder if that's missing) and the
    default instances **APIA–APIM**. Users, changes, settings, and the audit log start empty.
@@ -244,17 +249,27 @@ All state lives under `data/` (gitignored):
 
 ### Reset only part of it (keep the rest)
 
-With the server stopped, delete just the file(s) you want to clear; each is re-created on the next
+Pass one or more targets to the script (server stopped). Each cleared store is re-created on the next
 start:
 
-| Delete | Result on next start |
+```bash
+npm run reset:users          # shortcut: clear only the users (quickest "clean admin" reset)
+npm run reset -- changes      # clear one store
+npm run reset -- changes audit instances   # clear several at once
+```
+
+| Target | Result on next start |
 |---|---|
-| `data/users.json` | All users cleared → the next visitor becomes **Admin** again (re-triggers the admin bootstrap). Keeps instances, changes, and history. |
-| `data/changes.json` | All changes cleared; users, instances, and Git history kept. |
-| `data/instances.json` | Instance registry cleared → re-seeded to the defaults (APIA–APIM). |
-| `data/settings.json` | Settings reset to defaults (Jira epic `BSGPTALGO-550`). |
-| `data/audit.json` | Audit log cleared. |
-| `data/config-repo` | All Git history/branches cleared → re-seeded from the seed config. |
+| `users` | All users cleared → the next visitor becomes **Admin** again (re-triggers the admin bootstrap). Keeps instances, changes, and history. |
+| `changes` | All changes cleared; users, instances, and Git history kept. |
+| `instances` | Instance registry cleared → re-seeded to the defaults (APIA–APIM). |
+| `settings` | Settings reset to defaults (Jira epic `BSGPTALGO-550`). |
+| `audit` | Audit log cleared. |
+| `repo` | All Git history/branches cleared → re-seeded from the seed config. |
+| `all` | Everything (same as `npm run reset` with no target). |
+
+> The `--` in `npm run reset -- changes` is required, it tells npm to pass `changes` to the script
+> rather than treat it as an npm flag.
 
 ### Choosing which admin you get
 

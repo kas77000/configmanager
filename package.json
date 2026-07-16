@@ -4,7 +4,9 @@
   "workspaces": ["packages/*"],
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "reset": "node scripts/reset.mjs",
+    "reset:users": "node scripts/reset.mjs users"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
