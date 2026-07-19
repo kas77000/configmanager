@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { canApprove, api, type Change, type User } from '../api';
 import { Banner, ChangeStatusBadge, Skeleton, relTime } from '../components';
 import { IconCheck, IconX } from '../icons';
@@ -26,7 +26,7 @@ export default function Requests({ me }: { me: User | null }) {
         <div>
           <div className="eyebrow">Approvals</div>
           <h1>Requests</h1>
-          <p>Change requests awaiting a decision. Each shows what is being changed and the instances it targets. You approve or reject the request; the quant team handles the config itself.</p>
+          <p>Change requests awaiting a decision. Each shows the change, the files it modifies, and a short description. You approve or reject the request; the quant team handles the config itself.</p>
         </div>
       </div>
 
@@ -72,30 +72,23 @@ export default function Requests({ me }: { me: User | null }) {
   );
 }
 
+const TH: CSSProperties = { textAlign: 'left', fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--faint)', fontWeight: 500, padding: '6px 10px', borderBottom: '1px solid var(--border)' };
+const TD: CSSProperties = { padding: '7px 10px', borderBottom: '1px solid var(--border)', verticalAlign: 'top', fontSize: 13 };
+
 function RequestCard({ c, decide, run }: { c: Change; decide: boolean; run: <T>(p: Promise<T>) => Promise<void> }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
 
   return (
     <div className="panel" style={{ padding: 16 }}>
-      <div className="row-between" style={{ alignItems: 'flex-start' }}>
-        <div>
-          <div className="hstack" style={{ marginBottom: 4, flexWrap: 'wrap' }}>
-            <span className="mono" style={{ fontWeight: 600 }}>{c.id}</span>
-            <ChangeStatusBadge status={c.status} />
-            {(c.jiraTickets ?? []).map((t) => <a key={t.key} className="tag mono" href={t.url} target="_blank" rel="noreferrer" title={t.file} style={{ color: 'var(--accent)' }}>{t.key}</a>)}
-          </div>
-          <div style={{ fontSize: 14, marginBottom: 6 }}>{c.description}{c.effectiveDate && <span className="faint" style={{ fontWeight: 400 }}> · effective {c.effectiveDate}</span>}</div>
-          <div className="faint" style={{ fontSize: 12 }}>
-            Requested by <span className="mono">{c.submittedBy ?? c.createdBy}</span>{c.submittedAt ? ` · ${relTime(c.submittedAt)}` : ''}
-          </div>
-          <div className="hstack" style={{ marginTop: 8, flexWrap: 'wrap' }}>
-            <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Instances</span>
-            {c.targets.map((t) => <span key={t.instance} className="tag mono">{t.instance}</span>)}
-          </div>
+      <div className="row-between" style={{ alignItems: 'flex-start', gap: 12, marginBottom: 12 }}>
+        <div className="hstack" style={{ flexWrap: 'wrap', minWidth: 0 }}>
+          <span style={{ fontSize: 15, fontWeight: 600 }}>{c.description}</span>
+          <ChangeStatusBadge status={c.status} />
+          {c.effectiveDate && <span className="faint" style={{ fontSize: 12 }}>· effective {c.effectiveDate}</span>}
         </div>
         {decide && (
-          <div className="hstack">
+          <div className="hstack" style={{ flex: 'none' }}>
             <button className="btn btn-sm" style={{ borderColor: 'var(--success)', color: 'var(--success)' }} onClick={() => run(api.approveChange(c.id))}>
               <IconCheck style={{ width: 14, height: 14 }} />Approve
             </button>
@@ -103,6 +96,21 @@ function RequestCard({ c, decide, run }: { c: Change; decide: boolean; run: <T>(
           </div>
         )}
       </div>
+
+      <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <thead>
+          <tr><th style={{ ...TH, width: '38%' }}>File</th><th style={TH}>Description</th></tr>
+        </thead>
+        <tbody>
+          {c.items.map((it, i) => (
+            <tr key={`${it.file}-${i}`}>
+              <td className="mono" style={{ ...TD, fontWeight: 600 }}>{it.file}</td>
+              <td style={TD}>{it.description}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
       {rejecting && (
         <div style={{ marginTop: 12 }}>
           <Banner kind="warning">Rejecting sends the request back to the quant team.</Banner>

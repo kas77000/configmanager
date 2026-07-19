@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import Editor, { type OnMount } from '@monaco-editor/react';
 import type * as Monaco from 'monaco-editor';
 import { KNOWN_FIELDS, analyze, parseFile, type Finding, type Rule } from '@config-manager/rule-engine';
-import { ApiError, canApprove, canEdit, isAdmin, api, downloadEml, type Change, type ChangeTarget, type Gate, type JiraTemplate, type User } from '../api';
+import { ApiError, canApprove, canEdit, isAdmin, api, downloadEml, type Change, type ChangeTarget, type Gate, type User } from '../api';
 import { Banner, ChangeStatusBadge, DiffLines, FindingIcon, GateSummary, Menu, Skeleton, relTime } from '../components';
 import { currentTheme } from '../theme';
 import { IconCheck, IconMerge, IconPlus, IconX } from '../icons';
@@ -81,6 +81,7 @@ export default function ChangeDetail({ me }: { me: User | null }) {
 function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null; onChange: () => Promise<unknown> }) {
   const [rejecting, setRejecting] = useState(false);
   const [reason, setReason] = useState('');
+  const [confirmCancel, setConfirmCancel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -95,6 +96,9 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
   }
 
   const requester = canEdit(me?.roles);
+  // Cancellable until it is merged — fully, or on any single instance (a partial merge).
+  const anyMerged = change.status === 'merged' || change.targets.some((t) => t.mergedCommit);
+  const canCancel = requester && change.status !== 'cancelled' && change.status !== 'rejected' && !anyMerged;
   return (
     <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
       <div className="row-between" style={{ flexWrap: 'wrap', gap: 10 }}>
@@ -106,7 +110,14 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
         </div>
         <div className="hstack" style={{ flexWrap: 'wrap' }}>
           {canSubmit && <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => act(api.submitChange(change.id))}>Submit for approval</button>}
-          {requester && change.status === 'draft' && <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(api.cancelChange(change.id))}>Cancel change</button>}
+          {canCancel && (confirmCancel ? (
+            <span className="hstack">
+              <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => act(api.cancelChange(change.id))}>Confirm cancel</button>
+              <button className="btn btn-sm btn-ghost" disabled={busy} onClick={() => setConfirmCancel(false)}>Keep</button>
+            </span>
+          ) : (
+            <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => setConfirmCancel(true)}>Cancel change</button>
+          ))}
           {/* Email drafts live in a menu that only exists once the change is in an emailable state. */}
           {requester && change.status === 'submitted' && (
             <Menu label="Emails">
@@ -133,38 +144,26 @@ function ApprovalBar({ change, me, onChange }: { change: Change; me: User | null
   );
 }
 
-function CopyButton({ text }: { text: string }) {
-  const [done, setDone] = useState(false);
-  return (
-    <button type="button" className="btn btn-sm btn-ghost" onClick={async () => {
-      try { await navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1200); } catch { /* clipboard unavailable */ }
-    }}>{done ? <><IconCheck style={{ width: 13, height: 13 }} />Copied</> : 'Copy'}</button>
-  );
-}
-
-/** After approval, the requester creates the Jira ticket(s) in Jira and records the link(s) here.
- *  The app supplies a suggested summary + description per config file to paste into Jira. */
+/** After approval, the requester creates one Jira ticket per modification in Jira themselves and records the link(s) here. */
 function JiraPanel({ change, onChange }: { change: Change; onChange: () => Promise<unknown> }) {
-  const [tpl, setTpl] = useState<JiraTemplate | null>(null);
-  const [links, setLinks] = useState<Record<string, string>>({});
+  const items = change.items;
+  const [links, setLinks] = useState<Record<number, string>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => { api.jiraTemplate(change.id).then(setTpl).catch(() => setTpl({ epicKey: '', items: [] })); }, [change.id]);
   useEffect(() => {
-    const init: Record<string, string> = {};
-    for (const t of change.jiraTickets ?? []) init[t.file] = t.url;
+    const init: Record<number, string> = {};
+    for (const t of change.jiraTickets ?? []) init[t.item] = t.url;
     setLinks(init);
   }, [change.jiraTickets]);
 
-  const savedKey = (file: string) => (change.jiraTickets ?? []).find((t) => t.file === file)?.key;
+  const savedKey = (i: number) => (change.jiraTickets ?? []).find((t) => t.item === i)?.key;
 
   async function save() {
-    if (!tpl) return;
     setSaving(true); setErr(null); setSaved(false);
     try {
-      const tickets = tpl.items.map((it) => ({ file: it.file, url: (links[it.file] ?? '').trim(), key: '' })).filter((t) => t.url);
+      const tickets = items.map((_, i) => ({ item: i, url: (links[i] ?? '').trim() })).filter((t) => t.url);
       await api.setJira(change.id, tickets);
       await onChange();
       setSaved(true); setTimeout(() => setSaved(false), 1500);
@@ -172,45 +171,37 @@ function JiraPanel({ change, onChange }: { change: Change; onChange: () => Promi
     finally { setSaving(false); }
   }
 
-  const box = { fontSize: 12, padding: '6px 8px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)' } as const;
   return (
     <div className="panel" style={{ padding: 16, marginBottom: 16 }}>
       <div className="row-between" style={{ marginBottom: 6 }}>
         <strong>JIRA tickets</strong>
-        {tpl?.epicKey && <span className="faint" style={{ fontSize: 12 }}>epic <span className="mono">{tpl.epicKey}</span></span>}
       </div>
       <p className="faint" style={{ fontSize: 12, margin: '0 0 4px' }}>
-        Create one Jira ticket per config file{tpl?.epicKey ? ' under the epic above' : ''}, then paste each ticket link below. Use the suggested summary and description to fill the ticket.
+        Create one Jira ticket per modification in Jira, then paste each ticket link below.
       </p>
-      {!tpl ? <Skeleton rows={3} /> : tpl.items.length === 0 ? <div className="empty">No config files.</div> : (
-        <div className="stack" style={{ gap: 16 }}>
-          {tpl.items.map((it) => (
-            <div key={it.file} style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
-              <div className="row-between" style={{ marginBottom: 8 }}>
-                <span className="mono" style={{ fontWeight: 600 }}>{it.file}</span>
+      {items.length === 0 ? <div className="empty">No modifications.</div> : (
+        <div className="stack" style={{ gap: 14 }}>
+          {items.map((it, i) => (
+            <div key={i} style={{ borderTop: '1px solid var(--border)', paddingTop: 14 }}>
+              <div className="row-between" style={{ marginBottom: 4 }}>
+                <span className="faint" style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Modification {i + 1}</span>
                 <span className="faint mono" style={{ fontSize: 12 }}>{it.instances.join(', ')}</span>
               </div>
-              <div className="stack" style={{ gap: 8 }}>
-                <div>
-                  <div className="row-between" style={{ marginBottom: 3 }}><span className="insp-label" style={{ margin: 0 }}>Summary</span><CopyButton text={it.summary} /></div>
-                  <div className="mono" style={box}>{it.summary}</div>
-                </div>
-                <div>
-                  <div className="row-between" style={{ marginBottom: 3 }}><span className="insp-label" style={{ margin: 0 }}>Description</span><CopyButton text={it.description} /></div>
-                  <pre className="mono" style={{ ...box, margin: 0, whiteSpace: 'pre-wrap' }}>{it.description}</pre>
-                </div>
-                <label className="field" style={{ margin: 0 }}>
-                  <span>Ticket link{savedKey(it.file) ? <> · saved as <a className="mono" href={links[it.file]} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{savedKey(it.file)}</a></> : ''}</span>
-                  <input className="input mono" placeholder="https://your-jira/browse/BSGPTALGO-1234" value={links[it.file] ?? ''} onChange={(e) => setLinks((m) => ({ ...m, [it.file]: e.target.value }))} />
-                </label>
+              <div className="hstack" style={{ gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+                <span className="mono" style={{ fontWeight: 600 }}>{it.file}</span>
+                <span className="faint" style={{ fontSize: 13 }}>{it.description}</span>
               </div>
+              <label className="field" style={{ margin: 0 }}>
+                <span>Ticket link{savedKey(i) ? <> · saved as <a className="mono" href={links[i]} target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>{savedKey(i)}</a></> : ''}</span>
+                <input className="input mono" placeholder="https://your-jira/browse/BSGPTALGO-1234" value={links[i] ?? ''} onChange={(e) => setLinks((m) => ({ ...m, [i]: e.target.value }))} />
+              </label>
             </div>
           ))}
         </div>
       )}
       {err && <div style={{ marginTop: 10 }}><span className="badge error">{err}</span></div>}
       <div className="hstack" style={{ marginTop: 14 }}>
-        <button className="btn btn-sm btn-primary" onClick={save} disabled={saving || !tpl}>{saving ? <span className="spinner" /> : null}Save Jira links</button>
+        <button className="btn btn-sm btn-primary" onClick={save} disabled={saving}>{saving ? <span className="spinner" /> : null}Save Jira links</button>
         {saved && <span style={{ fontSize: 12, color: 'var(--success)' }}>Saved</span>}
       </div>
     </div>

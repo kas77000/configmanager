@@ -46,8 +46,8 @@ export function approvalEmail(change: Change, recipients: string[], cc: string[]
 export function recapEmail(change: Change, appBaseUrl: string, sender: string): BuiltEmail {
   const jira = change.jiraTickets ?? [];
   const rows = change.items
-    .map((it) => {
-      const t = jira.find((j) => j.file === it.file);
+    .map((it, i) => {
+      const t = jira.find((j) => j.item === i);
       const ticket = t ? `<a href="${esc(t.url)}">${esc(t.key)}</a>` : '—';
       return `<tr><td style="${TD}">${esc(it.description)}</td><td style="${TD}">${esc(it.file)}</td><td style="${TD}">${esc(it.instances.join(', '))}</td><td style="${TD}">${ticket}</td></tr>`;
     })

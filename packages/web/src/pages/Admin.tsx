@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { api, isAdmin, type Environment, type InstanceInfo, type LocationType, type User } from '../api';
-import { InfoTip, Skeleton, Tooltip } from '../components';
-import { IconChevron, IconPlus, IconTrash, IconX } from '../icons';
+import { InfoTip, Modal, Skeleton, Tooltip } from '../components';
+import { IconChevron, IconFile, IconPlus, IconTrash } from '../icons';
 
 const LOCATION_LABEL: Record<LocationType, string> = { shared: 'Shared drive', server: 'Server' };
 const LOCATION_PLACEHOLDER: Record<LocationType, string> = {
@@ -123,7 +123,7 @@ export default function Admin({ me }: { me: User | null }) {
             </thead>
             <tbody>
               {instances.map((i) => (
-                <InstanceRow key={i.code} inst={i} run={run} sa={{ user: saUser, configured: saConfigured }} />
+                <InstanceRow key={i.code} inst={i} run={run} refresh={refresh} sa={{ user: saUser, configured: saConfigured }} />
               ))}
             </tbody>
           </table>
@@ -133,9 +133,8 @@ export default function Admin({ me }: { me: User | null }) {
   );
 }
 
-function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promise<T>) => Promise<void>; sa: { user: string; configured: boolean } }) {
-  const [addingFile, setAddingFile] = useState(false);
-  const [fileName, setFileName] = useState('');
+function InstanceRow({ inst, run, refresh, sa }: { inst: InstanceInfo; run: <T>(p: Promise<T>) => Promise<void>; refresh: () => Promise<void>; sa: { user: string; configured: boolean } }) {
+  const [filesOpen, setFilesOpen] = useState(false);
   const [confirmDel, setConfirmDel] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [server, setServer] = useState(inst.serverAddress ?? '');
@@ -176,30 +175,11 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
             onChange={(e) => run(api.updateInstance(inst.code, { uat: e.target.checked }))} />
         </td>
         <td>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
-            {inst.files.map((f) => (
-              <span key={f} className="chip">
-                {f}
-                <button className="btn-ghost" title="Stop managing this file"
-                  style={{ border: 0, background: 'none', padding: 0, cursor: 'pointer', display: 'inline-flex', color: 'var(--faint)' }}
-                  onClick={() => run(api.removeInstanceFile(inst.code, f))}>
-                  <IconX style={{ width: 12, height: 12 }} />
-                </button>
-              </span>
-            ))}
-            {addingFile ? (
-              <span className="hstack" style={{ gap: 4 }}>
-                <input className="input" style={{ height: 26, width: 180 }} placeholder="filename.properties" autoFocus
-                  value={fileName} onChange={(e) => setFileName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter' && fileName.trim()) { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); } }} />
-                <button className="btn btn-sm btn-primary" disabled={!fileName.trim()}
-                  onClick={() => { run(api.addInstanceFile(inst.code, fileName.trim())); setFileName(''); setAddingFile(false); }}>Add</button>
-                <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(false)}>Cancel</button>
-              </span>
-            ) : (
-              <button className="btn btn-sm btn-ghost" onClick={() => setAddingFile(true)}><IconPlus style={{ width: 13, height: 13 }} />file</button>
-            )}
-          </div>
+          <button className="btn btn-sm" onClick={() => setFilesOpen(true)}>
+            <IconFile style={{ width: 14, height: 14 }} />
+            {inst.files.length === 0 ? 'No files' : `${inst.files.length} file${inst.files.length === 1 ? '' : 's'}`}
+          </button>
+          {filesOpen && <ManagedFilesModal inst={inst} refresh={refresh} onClose={() => setFilesOpen(false)} />}
         </td>
         <td style={{ textAlign: 'right' }}>
           {confirmDel ? (
@@ -244,12 +224,10 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
                     : 'Read directly from this location — no service account needed.'}
                 </span>
               </div>
-              {inst.files.length > 0 && (
-                <div className="faint" style={{ fontSize: 11 }}>
-                  <span style={{ textTransform: 'uppercase', letterSpacing: '0.05em' }}>File paths</span> — relative to the location; leave blank if the file sits directly in it.
-                </div>
-              )}
-              {inst.files.map((f) => <PathRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} base={server} run={run} />)}
+              <div className="faint" style={{ fontSize: 11 }}>
+                Manage the files tracked here — and each file's path relative to this location — from the
+                <span className="mono" style={{ margin: '0 3px' }}>Managed files</span> column.
+              </div>
             </div>
           </td>
         </tr>
@@ -258,17 +236,90 @@ function InstanceRow({ inst, run, sa }: { inst: InstanceInfo; run: <T>(p: Promis
   );
 }
 
-function PathRow({ code, file, path, base, run }: { code: string; file: string; path: string; base: string; run: <T>(p: Promise<T>) => Promise<void> }) {
+/** Lists every file the app manages for an instance, and lets an admin add, remove, and set the
+ *  relative path of each. Mutations refresh the parent list so the modal reflects changes live. */
+function ManagedFilesModal({ inst, refresh, onClose }: { inst: InstanceInfo; refresh: () => Promise<void>; onClose: () => void }) {
+  const [adding, setAdding] = useState(false);
+  const [fileName, setFileName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const base = inst.serverAddress ?? '';
+
+  async function op<T>(p: Promise<T>): Promise<boolean> {
+    setErr(null);
+    setBusy(true);
+    try { await p; await refresh(); return true; }
+    catch (e) { setErr(e instanceof Error ? e.message : 'failed'); return false; }
+    finally { setBusy(false); }
+  }
+
+  async function add() {
+    const name = fileName.trim();
+    if (!name) return;
+    if (await op(api.addInstanceFile(inst.code, name))) {
+      setFileName('');
+      setAdding(false);
+    }
+  }
+
+  return (
+    <Modal
+      title={<span className="hstack" style={{ gap: 8 }}><span className="mono">{inst.code}</span>managed files</span>}
+      subtitle="Config files the application manages for this instance."
+      onClose={onClose}
+      maxWidth={560}
+      footer={adding ? (
+        <span className="hstack" style={{ gap: 6, flex: 1 }}>
+          <input className="input mono" style={{ flex: 1 }} placeholder="filename.properties" autoFocus
+            value={fileName} onChange={(e) => setFileName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') add(); if (e.key === 'Escape') { setAdding(false); setFileName(''); } }} />
+          <button className="btn btn-primary" disabled={!fileName.trim() || busy} onClick={add}>{busy ? <span className="spinner" /> : null}Add</button>
+          <button className="btn btn-ghost" onClick={() => { setAdding(false); setFileName(''); }}>Cancel</button>
+        </span>
+      ) : (
+        <button className="btn btn-primary" onClick={() => setAdding(true)}><IconPlus />Add file</button>
+      )}
+    >
+      {err && <div style={{ marginBottom: 10 }}><span className="badge error">{err}</span></div>}
+      {inst.files.length === 0 ? (
+        <div className="empty">No files are managed for this instance yet.</div>
+      ) : (
+        <>
+          <div className="faint" style={{ fontSize: 11, marginBottom: 10 }}>
+            Each file's path is relative to the instance location — leave blank if the file sits directly in it.
+          </div>
+          <div className="stack" style={{ gap: 8 }}>
+            {inst.files.map((f) => (
+              <FileRow key={f} code={inst.code} file={f} path={inst.paths?.[f] ?? ''} base={base} op={op}
+                onRemove={() => op(api.removeInstanceFile(inst.code, f))} />
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function FileRow({ code, file, path, base, op, onRemove }: {
+  code: string; file: string; path: string; base: string;
+  op: <T>(p: Promise<T>) => Promise<boolean>; onRemove: () => void;
+}) {
   const [value, setValue] = useState(path);
   const effective = joinLocation(base, value.trim() || file);
   return (
-    <div className="stack" style={{ gap: 3 }}>
-      <label className="hstack" style={{ gap: 8 }}>
-        <span className="mono" style={{ fontSize: 12, width: 180, color: 'var(--muted)' }}>{file}</span>
-        <input className="input mono" style={{ height: 28, flex: 1, maxWidth: 520 }} placeholder={file} value={value}
-          onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) run(api.setInstanceFilePath(code, file, value)); }} />
-      </label>
-      <div className="faint mono" style={{ fontSize: 11, paddingLeft: 188, wordBreak: 'break-all' }}>→ {effective}</div>
+    <div className="stack" style={{ gap: 6, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)' }}>
+      <div className="hstack" style={{ justifyContent: 'space-between', gap: 8 }}>
+        <span className="hstack" style={{ gap: 8, minWidth: 0 }}>
+          <IconFile style={{ width: 15, height: 15, color: 'var(--faint)', flex: 'none' }} />
+          <span className="mono" style={{ fontSize: 13, fontWeight: 600, wordBreak: 'break-all' }}>{file}</span>
+        </span>
+        <button className="btn btn-sm btn-danger" title="Stop managing this file" style={{ flex: 'none' }} onClick={onRemove}>
+          <IconTrash style={{ width: 13, height: 13 }} />Remove
+        </button>
+      </div>
+      <input className="input mono" style={{ height: 28 }} placeholder={`${file} (path relative to location)`} value={value}
+        onChange={(e) => setValue(e.target.value)} onBlur={() => { if (value !== path) op(api.setInstanceFilePath(code, file, value)); }} />
+      <div className="faint mono" style={{ fontSize: 11, wordBreak: 'break-all' }}>→ {effective}</div>
     </div>
   );
 }

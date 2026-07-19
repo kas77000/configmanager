@@ -13,7 +13,6 @@ import { ChangeStore, type Change } from '../src/store/changes';
 import { InstanceStore, type ManagedInstance } from '../src/store/instances';
 import { SettingsStore, defaultSettings, type Settings } from '../src/store/settings';
 import { StaticInstanceReader } from '../src/instance-reader';
-import { StubJiraClient, type JiraClient } from '../src/jira';
 import { seedInstances, seedRepo } from '../src/bootstrap';
 
 const FILE = 'ai.fixmsg.properties';
@@ -26,7 +25,7 @@ interface Harness {
   reader: StaticInstanceReader;
 }
 
-async function makeHarness(jira: JiraClient = new StubJiraClient(), serviceAccount = { user: '', configured: false }): Promise<Harness> {
+async function makeHarness(serviceAccount = { user: '', configured: false }): Promise<Harness> {
   const dir = await mkdtemp(join(tmpdir(), 'cfgapi-'));
   const repo = new ConfigRepo(join(dir, 'repo'), FILE);
   await seedRepo(repo, CLEAN);
@@ -40,7 +39,7 @@ async function makeHarness(jira: JiraClient = new StubJiraClient(), serviceAccou
   await users.upsert({ windowsId: 'root', displayName: 'Root Admin', email: 'root@x', roles: ['admin'] });
   await users.upsert({ windowsId: 'ed', displayName: 'Ed Editor', email: 'ed@x', roles: ['editor'] });
   const settings = new SettingsStore(new JsonStore<Settings>(join(dir, 'settings.json'), defaultSettings));
-  const app = createApp({ repo, users, audit, changes, instances, reader, jira, settings, serviceAccount, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
+  const app = createApp({ repo, users, audit, changes, instances, reader, settings, serviceAccount, appBaseUrl: 'http://cm.local', identity: { header: HEADER } });
   return { app, dir, reader };
 }
 
@@ -248,7 +247,7 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('records Jira links after approval and exposes a per-file ticket template', async () => {
+  it('records the Jira links the requester provides after approval', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
     await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', roles: ['editor', 'stakeholder'], email: 'boss@x' }).expect(201);
@@ -265,30 +264,45 @@ describe('API (per-instance)', () => {
     expect(eml.text).toContain('risk.properties');
 
     // Jira links cannot be attached until the change is approved.
-    await ed('put', `/api/changes/${id}/jira`).send({ tickets: [{ file: FILE, url: 'https://jira.local/browse/X-1' }] }).expect(409);
+    await ed('put', `/api/changes/${id}/jira`).send({ tickets: [{ item: 0, url: 'https://jira.local/browse/X-1' }] }).expect(409);
 
-    // Approval no longer auto-creates Jira tickets.
+    // Approval does not create Jira tickets; the requester makes them and provides the links.
     const approved = await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
     expect(approved.body.jiraTickets ?? []).toHaveLength(0);
 
-    // The app suggests one ticket (summary + description) per config file.
-    const tpl = (await ed('get', `/api/changes/${id}/jira-template`).expect(200)).body;
-    expect(tpl.epicKey).toBe('BSGPTALGO-550');
-    expect(tpl.items.map((i: { file: string }) => i.file).sort()).toEqual(['ai.fixmsg.properties', 'risk.properties']);
-    const fixItem = tpl.items.find((i: { file: string }) => i.file === FILE);
-    expect(fixItem.summary).toContain('Korea 144=1');
-    expect(fixItem.description).toContain('Instances: APIA');
-
-    // The requester records the ticket links they created; keys are derived from the URLs.
+    // One ticket per modification (indexed into items); keys are derived from the URLs.
     const saved = (await ed('put', `/api/changes/${id}/jira`).send({ tickets: [
-      { file: FILE, url: 'https://jira.local/browse/BSGPTALGO-1001' },
-      { file: 'risk.properties', url: 'https://jira.local/browse/BSGPTALGO-1002' },
-      { file: 'not-in-change.properties', url: 'https://jira.local/browse/BSGPTALGO-9999' }, // ignored
+      { item: 0, url: 'https://jira.local/browse/BSGPTALGO-1001' },
+      { item: 1, url: 'https://jira.local/browse/BSGPTALGO-1002' },
+      { item: 9, url: 'https://jira.local/browse/BSGPTALGO-9999' }, // out of range, ignored
     ] }).expect(200)).body;
     expect(saved.jiraTickets).toHaveLength(2);
-    const fixTicket = saved.jiraTickets.find((t: { file: string }) => t.file === FILE);
-    expect(fixTicket.key).toBe('BSGPTALGO-1001');
-    expect(fixTicket.url).toBe('https://jira.local/browse/BSGPTALGO-1001');
+    const first = saved.jiraTickets.find((t: { item: number }) => t.item === 0);
+    expect(first.file).toBe(FILE);
+    expect(first.key).toBe('BSGPTALGO-1001');
+    expect(first.url).toBe('https://jira.local/browse/BSGPTALGO-1001');
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('takes one Jira ticket per modification — even two on the same file', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    await as(h.app, 'root')('post', '/api/users').send({ windowsId: 'boss', roles: ['editor', 'stakeholder'], email: 'boss@x' }).expect(201);
+
+    // A change composed of two kinds of change, both on the same file.
+    const id = (await ed('post', '/api/changes').send({ description: 'Two-part change', items: [
+      { file: FILE, description: 'raise HK cap', instances: ['APIA'] },
+      { file: FILE, description: 'block Post layering', instances: ['APIA'] },
+    ] }).expect(201)).body.id;
+    await ed('post', `/api/changes/${id}/submit`).expect(200);
+    await as(h.app, 'boss')('post', `/api/changes/${id}/approve`).expect(200);
+
+    const saved = (await ed('put', `/api/changes/${id}/jira`).send({ tickets: [
+      { item: 0, url: 'https://jira.local/browse/BSGPTALGO-2001' },
+      { item: 1, url: 'https://jira.local/browse/BSGPTALGO-2002' },
+    ] }).expect(200)).body;
+    expect(saved.jiraTickets).toHaveLength(2);
+    expect(saved.jiraTickets.map((t: { key: string }) => t.key).sort()).toEqual(['BSGPTALGO-2001', 'BSGPTALGO-2002']);
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -302,22 +316,35 @@ describe('API (per-instance)', () => {
     await rm(h.dir, { recursive: true, force: true });
   });
 
-  it('jira-template uses the configured epic (default BSGPTALGO-550)', async () => {
-    const h = await makeHarness();
-    const ed = as(h.app, 'ed');
-    const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
-    const tpl = (await ed('get', `/api/changes/${id}/jira-template`).expect(200)).body;
-    expect(tpl.epicKey).toBe('BSGPTALGO-550');
-    await rm(h.dir, { recursive: true, force: true });
-  });
-
   it('cancels a draft change', async () => {
     const h = await makeHarness();
     const ed = as(h.app, 'ed');
     const id = (await ed('post', '/api/changes').send({ description: 'x', instances: ['APIA'] }).expect(201)).body.id;
     const c = await ed('post', `/api/changes/${id}/cancel`).expect(200);
     expect(c.body.status).toBe('cancelled');
-    await ed('post', `/api/changes/${id}/cancel`).expect(409); // no longer a draft
+    await ed('post', `/api/changes/${id}/cancel`).expect(409); // already cancelled
+    await rm(h.dir, { recursive: true, force: true });
+  });
+
+  it('cancels an approved change, but not once it is merged', async () => {
+    const h = await makeHarness();
+    const ed = as(h.app, 'ed');
+    const admin = as(h.app, 'root'); // admin can approve
+
+    // Approved but not yet merged → still cancellable.
+    const id1 = (await ed('post', '/api/changes').send({ description: 'approved change', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('post', `/api/changes/${id1}/submit`).expect(200);
+    await admin('post', `/api/changes/${id1}/approve`).expect(200);
+    const cancelled = (await ed('post', `/api/changes/${id1}/cancel`).expect(200)).body;
+    expect(cancelled.status).toBe('cancelled');
+
+    // Approved, edited, then merged on its only instance → too late to cancel.
+    const id2 = (await ed('post', '/api/changes').send({ description: 'merged change', instances: ['APIA'] }).expect(201)).body.id;
+    await ed('put', `/api/changes/${id2}/instances/APIA/files/${FILE}`).send({ content: '9012=1=1 :: compositeExchangeCode=JP\n', message: 'e' }).expect(200);
+    await ed('post', `/api/changes/${id2}/submit`).expect(200);
+    await admin('post', `/api/changes/${id2}/approve`).expect(200);
+    await ed('post', `/api/changes/${id2}/instances/APIA/merge`).send({}).expect(200);
+    await ed('post', `/api/changes/${id2}/cancel`).expect(409); // merged — too late
     await rm(h.dir, { recursive: true, force: true });
   });
 
@@ -333,7 +360,7 @@ describe('API (per-instance)', () => {
   });
 
   it('exposes the env service account (user + configured), never a password', async () => {
-    const h = await makeHarness(new StubJiraClient(), { user: 'svc-config', configured: true });
+    const h = await makeHarness({ user: 'svc-config', configured: true });
     const got = await as(h.app, 'root')('get', '/api/settings').expect(200);
     expect(got.body.serviceAccountUser).toBe('svc-config');
     expect(got.body.serviceAccountConfigured).toBe(true);

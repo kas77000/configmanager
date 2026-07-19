@@ -4,7 +4,6 @@ import { ROLES, type Role, type UserDirectory, canApprove, canEdit, isAdmin } fr
 import type { AuditLog } from './store/audit';
 import type { Change, ChangeItem, ChangeStore, ChangeTarget, JiraTicket } from './store/changes';
 import { InstanceStore, isLocationType, isValidInstanceCode, type LocationType } from './store/instances';
-import type { JiraClient } from './jira';
 import type { ServiceAccount, SettingsStore } from './store/settings';
 import { approvalEmail, recapEmail, toEml } from './email';
 import { type AuthedRequest, identityMiddleware, requireUser } from './identity';
@@ -23,28 +22,6 @@ function keyFromUrl(url: string): string {
   return parts[parts.length - 1] || url;
 }
 
-export interface JiraTemplateItem { file: string; instances: string[]; summary: string; description: string; }
-export interface JiraTemplate { epicKey: string; items: JiraTemplateItem[]; }
-
-/** Suggested Jira ticket content (one per config file) for the user to paste into Jira. */
-function buildJiraTemplate(change: Change, epicKey: string, appBaseUrl: string): JiraTemplate {
-  const files = [...new Set(change.targets.flatMap((t) => t.files))];
-  const items = files.map((file) => {
-    const instances = change.targets.filter((t) => t.files.includes(file)).map((t) => t.instance);
-    const details = change.items.filter((it) => it.file === file).map((it) => it.description).filter(Boolean);
-    const description = [
-      `Change ${change.id}: ${change.description}`,
-      `Config file: ${file}`,
-      `Instances: ${instances.join(', ')}`,
-      change.effectiveDate ? `Effective date: ${change.effectiveDate}` : null,
-      details.length ? `Details: ${details.join('; ')}` : null,
-      `Configuration Manager: ${appBaseUrl.replace(/\/$/, '')}/changes/${change.id}`,
-    ].filter(Boolean).join('\n');
-    return { file, instances, summary: `[Config] ${change.description} — ${file}`, description };
-  });
-  return { epicKey, items };
-}
-
 export interface AppDeps {
   repo: ConfigRepo;
   users: UserDirectory;
@@ -52,7 +29,6 @@ export interface AppDeps {
   changes: ChangeStore;
   instances: InstanceStore;
   reader: InstanceReader;
-  jira: JiraClient;
   settings: SettingsStore;
   /** Service account (from the environment), used to reach the instances. */
   serviceAccount: ServiceAccount;
@@ -139,9 +115,8 @@ export function createApp(deps: AppDeps): Express {
   }));
 
   // --- Settings (admin) ----------------------------------------------------
-  const settingsView = (s: { quantDistributionEmail: string; jiraEpicKey: string }) => ({
+  const settingsView = (s: { quantDistributionEmail: string }) => ({
     quantDistributionEmail: s.quantDistributionEmail,
-    jiraEpicKey: s.jiraEpicKey,
     serviceAccountUser: deps.serviceAccount.user,
     serviceAccountConfigured: deps.serviceAccount.configured,
   });
@@ -152,9 +127,8 @@ export function createApp(deps: AppDeps): Express {
   }));
   api.patch('/settings', wrap(async (req, res) => {
     if (!requireAdmin(req, res)) return;
-    const patch: { quantDistributionEmail?: string; jiraEpicKey?: string } = {};
+    const patch: { quantDistributionEmail?: string } = {};
     if (req.body?.quantDistributionEmail !== undefined) patch.quantDistributionEmail = String(req.body.quantDistributionEmail).trim();
-    if (req.body?.jiraEpicKey !== undefined) patch.jiraEpicKey = String(req.body.jiraEpicKey).trim();
     res.json(settingsView(await deps.settings.update(patch)));
   }));
 
@@ -399,7 +373,10 @@ export function createApp(deps: AppDeps): Express {
     if (!requireEdit(req, res)) return;
     const existing = await changes.get(req.params.id);
     if (!existing) { res.status(404).json({ error: 'change not found' }); return; }
-    if (existing.status !== 'draft') { res.status(409).json({ error: 'only a draft change can be cancelled' }); return; }
+    if (existing.status === 'cancelled') { res.status(409).json({ error: 'change is already cancelled' }); return; }
+    if (existing.status === 'merged' || existing.targets.some((t) => t.mergedCommit)) {
+      res.status(409).json({ error: 'a merged change cannot be cancelled' }); return;
+    }
     const change = await changes.cancel(req.params.id, requireUser(req).windowsId);
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'cancel-change', details: { changeId: req.params.id } });
     res.json(change);
@@ -414,16 +391,7 @@ export function createApp(deps: AppDeps): Express {
     res.json(change);
   }));
 
-  // Suggested Jira ticket content (summary + description per config file) for the user to paste into Jira.
-  api.get('/changes/:id/jira-template', wrap(async (req, res) => {
-    if (!requireEdit(req, res)) return;
-    const change = await changes.get(req.params.id);
-    if (!change) { res.status(404).json({ error: 'change not found' }); return; }
-    const epicKey = (await deps.settings.get()).jiraEpicKey || '';
-    res.json(buildJiraTemplate(change, epicKey, deps.appBaseUrl));
-  }));
-
-  // The requester records the Jira ticket link(s) they created (one per config file).
+  // The requester creates the Jira ticket(s) themselves and records the link(s) here (one per modification).
   api.put('/changes/:id/jira', wrap(async (req, res) => {
     if (!requireEdit(req, res)) return;
     const change = await changes.get(req.params.id);
@@ -431,16 +399,18 @@ export function createApp(deps: AppDeps): Express {
     if (change.status !== 'approved' && change.status !== 'merged') {
       res.status(409).json({ error: 'Jira tickets can be attached once the change is approved.' }); return;
     }
-    const validFiles = new Set(change.targets.flatMap((t) => t.files));
     const raw: unknown[] = Array.isArray(req.body?.tickets) ? req.body.tickets : [];
     const tickets: JiraTicket[] = [];
+    const seen = new Set<number>();
     for (const t of raw) {
-      const rec = t as { file?: unknown; key?: unknown; url?: unknown };
-      const file = String(rec.file ?? '');
+      const rec = t as { item?: unknown; key?: unknown; url?: unknown };
+      const item = Number(rec.item);
       const url = String(rec.url ?? '').trim();
-      if (!validFiles.has(file) || !url) continue; // skip unknown files / blank links
+      // skip out-of-range modifications, duplicates, and blank links
+      if (!Number.isInteger(item) || item < 0 || item >= change.items.length || seen.has(item) || !url) continue;
+      seen.add(item);
       const key = String(rec.key ?? '').trim() || keyFromUrl(url);
-      tickets.push({ file, key, url });
+      tickets.push({ item, file: change.items[item].file, key, url });
     }
     const updated = await changes.setJiraTickets(change.id, tickets);
     await audit.append({ windowsId: requireUser(req).windowsId, ip: req.ip, action: 'attach-jira', details: { changeId: change.id, jira: tickets.map((t) => t.key) } });

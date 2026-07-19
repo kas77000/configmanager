@@ -31,16 +31,14 @@ export interface InstanceInfo {
   code: string; environment: Environment; uat: boolean; files: string[];
   locationType?: LocationType; serverAddress?: string; paths?: Record<string, string>;
 }
-export interface Settings { quantDistributionEmail: string; jiraEpicKey: string; serviceAccountUser: string; serviceAccountConfigured: boolean; }
-export interface SettingsPatch { quantDistributionEmail?: string; jiraEpicKey?: string; }
+export interface Settings { quantDistributionEmail: string; serviceAccountUser: string; serviceAccountConfigured: boolean; }
+export interface SettingsPatch { quantDistributionEmail?: string; }
 
 export interface ChangeTarget { instance: string; branch: string; files: string[]; mergedCommit?: string; }
 export interface ChangeItem { file: string; description: string; instances: string[]; }
 export type ChangeStatus = 'draft' | 'submitted' | 'approved' | 'rejected' | 'merged' | 'cancelled';
 export interface ChangeDecision { by: string; at: string; action: 'approved' | 'rejected'; reason?: string; }
-export interface JiraTicket { file: string; key: string; url: string; }
-export interface JiraTemplateItem { file: string; instances: string[]; summary: string; description: string; }
-export interface JiraTemplate { epicKey: string; items: JiraTemplateItem[]; }
+export interface JiraTicket { item: number; file: string; key: string; url: string; }
 export interface Change {
   id: string; description: string; effectiveDate?: string; items: ChangeItem[]; createdBy: string; createdAt: string;
   status: ChangeStatus; targets: ChangeTarget[];
@@ -72,7 +70,7 @@ export class ApiError extends Error {
 }
 
 const DEV_USER_KEY = 'cm.devUser';
-export function getDevUser(): string { return localStorage.getItem(DEV_USER_KEY) ?? 'salavat'; }
+export function getDevUser(): string { return localStorage.getItem(DEV_USER_KEY) ?? 'admin'; }
 export function setDevUser(id: string): void { localStorage.setItem(DEV_USER_KEY, id); }
 
 /** Downloads a change's Outlook draft (.eml). The user opens it to review and send. */
@@ -137,8 +135,7 @@ export const api = {
   submitChange: (id: string) => req<Change>('POST', `/changes/${id}/submit`, {}),
   approveChange: (id: string) => req<Change>('POST', `/changes/${id}/approve`, {}),
   rejectChange: (id: string, reason: string) => req<Change>('POST', `/changes/${id}/reject`, { reason }),
-  jiraTemplate: (id: string) => req<JiraTemplate>('GET', `/changes/${id}/jira-template`),
-  setJira: (id: string, tickets: JiraTicket[]) => req<Change>('PUT', `/changes/${id}/jira`, { tickets }),
+  setJira: (id: string, tickets: { item: number; url: string }[]) => req<Change>('PUT', `/changes/${id}/jira`, { tickets }),
 
   changeFile: (id: string, code: string, file: string) =>
     req<{ instance: string; file: string; content: string }>('GET', `/changes/${id}/instances/${code}/files/${encodeURIComponent(file)}`),

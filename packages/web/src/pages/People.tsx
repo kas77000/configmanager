@@ -7,21 +7,20 @@ export default function People({ me }: { me: User | null }) {
   const [users, setUsers] = useState<User[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [dist, setDist] = useState('');
-  const [epic, setEpic] = useState('');
-  const [saved, setSaved] = useState({ dist: '', epic: '' });
+  const [saved, setSaved] = useState({ dist: '' });
 
   async function refresh() { setUsers(await api.users()); }
   useEffect(() => {
     refresh().catch(() => setUsers([]));
-    api.settings().then((s) => { setDist(s.quantDistributionEmail); setEpic(s.jiraEpicKey); setSaved({ dist: s.quantDistributionEmail, epic: s.jiraEpicKey }); }).catch(() => {});
+    api.settings().then((s) => { setDist(s.quantDistributionEmail); setSaved({ dist: s.quantDistributionEmail }); }).catch(() => {});
   }, []);
 
-  const settingsDirty = dist.trim() !== saved.dist || epic.trim() !== saved.epic;
+  const settingsDirty = dist.trim() !== saved.dist;
   async function saveSettings() {
     setErr(null);
     try {
-      const s = await api.updateSettings({ quantDistributionEmail: dist.trim(), jiraEpicKey: epic.trim() });
-      setDist(s.quantDistributionEmail); setEpic(s.jiraEpicKey); setSaved({ dist: s.quantDistributionEmail, epic: s.jiraEpicKey });
+      const s = await api.updateSettings({ quantDistributionEmail: dist.trim() });
+      setDist(s.quantDistributionEmail); setSaved({ dist: s.quantDistributionEmail });
     } catch (e) { setErr(e instanceof Error ? e.message : 'failed'); }
   }
 
@@ -50,8 +49,6 @@ export default function People({ me }: { me: User | null }) {
         <div style={{ display: 'grid', gridTemplateColumns: 'max-content minmax(0, 320px)', gap: '12px 14px', alignItems: 'center' }}>
           <span className="setting-label">Quant distribution email <InfoTip text="CC'd on every approval-request email so the quant team is kept in the loop." /></span>
           <input className="input" value={dist} onChange={(e) => setDist(e.target.value)} placeholder="quant-team@firm.com" />
-          <span className="setting-label">JIRA epic <InfoTip text="Config-change tickets are created under this epic (set as the issue's parent)." /></span>
-          <input className="input mono" value={epic} onChange={(e) => setEpic(e.target.value)} placeholder="BSGPTALGO-550" />
           <div style={{ gridColumn: '1 / -1' }}><button className="btn btn-sm" disabled={!settingsDirty} onClick={saveSettings}>Save settings</button></div>
         </div>
       </div>

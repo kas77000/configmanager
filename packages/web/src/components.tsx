@@ -1,6 +1,42 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { ChangeStatus, Finding, InstanceInfo } from './api';
-import { IconAlertTriangle, IconChevron, IconDiamond, IconInfo } from './icons';
+import { IconAlertTriangle, IconChevron, IconDiamond, IconInfo, IconX } from './icons';
+
+/** Centered modal dialog rendered in a portal. Closes on Escape or backdrop click. */
+export function Modal({ title, subtitle, onClose, children, footer, maxWidth = 520 }: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  onClose: () => void;
+  children: ReactNode;
+  footer?: ReactNode;
+  maxWidth?: number;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+
+  return createPortal(
+    <div className="modal-overlay" onMouseDown={onClose}>
+      <div className="modal" role="dialog" aria-modal="true" style={{ maxWidth }} onMouseDown={(e) => e.stopPropagation()}>
+        <div className="modal-head">
+          <div className="stack" style={{ gap: 2 }}>
+            <h3 className="modal-title">{title}</h3>
+            {subtitle && <div className="faint" style={{ fontSize: 12 }}>{subtitle}</div>}
+          </div>
+          <button className="btn btn-ghost btn-sm" aria-label="Close" onClick={onClose}><IconX /></button>
+        </div>
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-foot">{footer}</div>}
+      </div>
+    </div>,
+    document.body,
+  );
+}
 
 /** Wraps a trigger; shows `content` as a hover/focus popover. No content = passthrough. */
 export function Tooltip({ content, children }: { content?: ReactNode; children: ReactNode }) {

@@ -20,7 +20,8 @@ export interface ChangeDecision {
   reason?: string;
 }
 
-export interface JiraTicket { file: string; key: string; url: string; }
+/** A Jira ticket link the requester records for one modification (indexed into `items`). */
+export interface JiraTicket { item: number; file: string; key: string; url: string; }
 
 /** One modification within a change: a config file, its own description, and the instances it applies to. */
 export interface ChangeItem {
@@ -43,7 +44,7 @@ export interface Change {
   status: ChangeStatus;
   submittedBy?: string;
   submittedAt?: string;
-  /** Jira tickets created on approval, one per config file. */
+  /** Jira ticket link(s) the requester creates and records after approval, one per modification. */
   jiraTickets?: JiraTicket[];
   decision?: ChangeDecision;
 }
@@ -107,12 +108,14 @@ export class ChangeStore {
     });
   }
 
-  /** Cancels a draft change. */
+  /** Cancels a change. Allowed from any state except once it has been merged — fully, or on any
+   *  single instance (a partial merge) — since that config is already applied and can't be pulled back. */
   async cancel(id: string, _by: string): Promise<Change | undefined> {
     return this.store.update((changes) => {
       const change = changes.find((c) => c.id === id);
       if (!change) return undefined;
-      if (change.status === 'draft') change.status = 'cancelled';
+      const merged = change.status === 'merged' || change.targets.some((t) => t.mergedCommit);
+      if (change.status !== 'cancelled' && !merged) change.status = 'cancelled';
       return change;
     });
   }

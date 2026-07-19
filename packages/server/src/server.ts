@@ -11,11 +11,10 @@ import { ChangeStore, type Change } from './store/changes';
 import { InstanceStore, type ManagedInstance } from './store/instances';
 import { SettingsStore, type Settings, defaultSettings, serviceAccountFromEnv } from './store/settings';
 import { StaticInstanceReader } from './instance-reader';
-import { makeJiraClient } from './jira';
-import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig } from './config';
+import { DEV_USER_ENV, IDENTITY_HEADER, MANAGED_FILE, defaultConfig, instanceBranch } from './config';
 
 export async function main(): Promise<void> {
-  // Load secrets/config from a .env file if present (SERVICE_ACCOUNT_*, JIRA_*, APP_BASE_URL, ...).
+  // Load secrets/config from a .env file if present (SERVICE_ACCOUNT_*, APP_BASE_URL, ...).
   try { process.loadEnvFile(); } catch { /* no .env file, use real env */ }
   const cfg = {
     ...defaultConfig,
@@ -41,17 +40,27 @@ export async function main(): Promise<void> {
   // Dev convenience: outside production, the default dev identity is an admin so you can
   // drive the whole app immediately. A real reverse proxy + Windows auth is used in prod.
   if (process.env.NODE_ENV !== 'production') {
-    const devUser = process.env[DEV_USER_ENV] || 'salavat';
+    const devUser = process.env[DEV_USER_ENV] || 'admin';
     await users.ensure(devUser);
     await users.setRoles(devUser, ['admin']);
   }
 
   const reader = new StaticInstanceReader();
-  const jira = makeJiraClient(process.env);
+  // Dev stand-in: with no real instances to reach, seed each instance's "live" file from the
+  // version currently recorded in the repo, so a Sync is a clean no-op until the live content
+  // actually drifts. A real reader (network share / SSH via the service account) replaces this
+  // behind the same interface in production.
+  if (process.env.NODE_ENV !== 'production') {
+    for (const inst of await instances.list()) {
+      try {
+        reader.set(inst.code, MANAGED_FILE, await repo.readFile(instanceBranch(inst.code)));
+      } catch { /* no recorded file yet — leave unset so Sync honestly reports it unreachable */ }
+    }
+  }
   const settings = new SettingsStore(new JsonStore<Settings>(join(cfg.dataDir, 'settings.json'), defaultSettings));
 
   const app = createApp({
-    repo, users, audit, changes, instances, reader, jira, settings,
+    repo, users, audit, changes, instances, reader, settings,
     serviceAccount: serviceAccountFromEnv(process.env),
     appBaseUrl: cfg.appBaseUrl,
     identity: { header: IDENTITY_HEADER, devUser: process.env[DEV_USER_ENV] },

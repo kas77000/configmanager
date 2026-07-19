@@ -37,6 +37,9 @@ export const IconSync = (p: SVGProps<SVGSVGElement>) => (
 export const IconPlus = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><path d="M12 5v14M5 12h14" /></svg>
 );
+export const IconFile = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}><path d="M6 3h8l4 4v14a0 0 0 0 1 0 0H6a0 0 0 0 1 0 0V3Z" /><path d="M14 3v4h4" /></svg>
+);
 export const IconMerge = (p: SVGProps<SVGSVGElement>) => (
   <svg {...base(p)}><circle cx="7" cy="6" r="2.2" /><circle cx="7" cy="18" r="2.2" /><circle cx="17" cy="12" r="2.2" /><path d="M7 8.2v7.6M7 12h5.2a3 3 0 0 0 2.6-1.5" /></svg>
 );

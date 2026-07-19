@@ -1,4 +1,5 @@
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** The single config file managed in Phase 1. */
 export const MANAGED_FILE = 'ai.fixmsg.properties';
@@ -71,7 +72,11 @@ export interface ServerConfig {
   appBaseUrl: string;
 }
 
-const root = process.cwd();
+// Anchor on-disk paths (data/, configsMoc/) to the repo root, independent of the process's cwd,
+// so the server, the tests, and `npm run reset` all agree on one location no matter how the server
+// is launched (from the repo root, from packages/server, or via `npm run … -w`). This file lives at
+// packages/server/src/config.ts, so the repo root is three directories up.
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 export const defaultConfig: ServerConfig = {
   repoDir: join(root, 'data', 'config-repo'),

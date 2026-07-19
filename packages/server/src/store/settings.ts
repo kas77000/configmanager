@@ -3,13 +3,10 @@ import { JsonStore } from './json-store';
 export interface Settings {
   /** Quant-team distribution list, CC'd on every approval request. */
   quantDistributionEmail: string;
-  /** Jira epic that all config-change tickets are created under. */
-  jiraEpicKey: string;
 }
 
 export const defaultSettings: Settings = {
   quantDistributionEmail: '',
-  jiraEpicKey: 'BSGPTALGO-550',
 };
 
 /**
