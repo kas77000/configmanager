@@ -1,0 +1,42 @@
+# Configuration Manager v2 — theme.
+# Locked to a single dark base (DESIGN.md: "dark is the considered default") so
+# Streamlit's native widgets don't fall back to the browser's light preference.
+# The exact OKLCH tokens — and the light/dark toggle — are handled at runtime in
+# app_pages/ui.py, which recolours every surface via injected CSS variables.
+
+[theme]
+base = "dark"
+primaryColor = "#7b86f0"
+backgroundColor = "#1b1d24"
+secondaryBackgroundColor = "#23262f"
+textColor = "#ebecf1"
+linkColor = "#8b95f2"
+codeBackgroundColor = "#23262f"
+borderColor = "#3a3d47"
+font = "sans-serif"
+codeFont = "monospace"
+baseFontSize = 13
+baseRadius = "6px"
+buttonRadius = "6px"
+showWidgetBorder = true
+showSidebarBorder = true
+redColor = "#f0736a"
+orangeColor = "#e6b84d"
+yellowColor = "#e6b84d"
+greenColor = "#5fd39a"
+blueColor = "#6ea8e6"
+violetColor = "#b07be0"
+grayColor = "#a6abb5"
+
+[theme.sidebar]
+backgroundColor = "#23262f"
+secondaryBackgroundColor = "#2b2e38"
+textColor = "#ebecf1"
+borderColor = "#3a3d47"
+primaryColor = "#7b86f0"
+
+[server]
+runOnSave = true
+
+[browser]
+gatherUsageStats = false
