@@ -30,16 +30,26 @@ def _do_sync(store: Store, me: dict, codes: list[str], results: dict) -> None:
 
 
 _COLS = [0.45, 1.4, 2.2, 2.1, 2.2]
-_LABELS = ["", "Instance", "Environment", "Sync", ""]
+_LABELS = ["", "Instance", "Environment", "Sync", "Actions"]
 
 
-def _header(env: str) -> None:
+def _toggle_all(env: str, codes: list[str]) -> None:
+    val = st.session_state.get(f"selall_{env}", False)
+    for c in codes:
+        st.session_state[f"inst_sel_{c}"] = val
+
+
+def _header(env: str, group: list[dict]) -> None:
+    codes = [i["code"] for i in group]
     with st.container(key=f"insthead_{env}"):
         h = st.columns(_COLS, vertical_alignment="center")
+        h[0].checkbox("select all", key=f"selall_{env}", label_visibility="collapsed",
+                      on_change=_toggle_all, args=(env, codes))
         for i, lbl in enumerate(_LABELS):
             if lbl:
+                align = "text-align:center" if lbl == "Actions" else ""
                 h[i].markdown(f'<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
-                              f'letter-spacing:.04em">{lbl}</div>', unsafe_allow_html=True)
+                              f'letter-spacing:.04em;{align}">{lbl}</div>', unsafe_allow_html=True)
 
 
 def render(store: Store, me: dict) -> None:
@@ -66,7 +76,7 @@ def render(store: Store, me: dict) -> None:
               f'<span class="count-chip">{len(group)}</span></div>')
 
         with st.container(border=True):
-            _header(env)
+            _header(env, group)
             for inst in group:
                 code = inst["code"]
                 with st.container(key=f"instrow_{code}"):

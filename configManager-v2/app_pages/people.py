@@ -93,7 +93,8 @@ def _list_view(store: Store, me: dict) -> None:
         wid = acols[0].text_input("Windows ID", key="ap_wid", placeholder="salavat")
         name = acols[1].text_input("Name", key="ap_name", placeholder="Salavat Example")
         pemail = acols[2].text_input("Email", key="ap_email", placeholder="salavat@firm.com")
-        picked = st.multiselect("Roles", _ROLE_LABELS, default=["Quant"], key="ap_roles")
+        rcols = st.columns(3)
+        picked = rcols[0].multiselect("Roles", _ROLE_LABELS, default=["Quant"], key="ap_roles")
         valid = bool(wid.strip() and name.strip() and pemail.strip())
         if st.button("Add person", type="primary", disabled=not valid):
             try:

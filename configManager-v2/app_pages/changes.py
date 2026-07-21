@@ -43,7 +43,7 @@ def _new_view(store: Store, me: dict) -> None:
         eff = top[1].date_input("Effective date", value=_next_business_day(), key="nc_eff")
 
         st.divider()
-        ui.md(f'<div class="insp-label" style="margin-top:0">Modifications · {len(mods)}</div>')
+        ui.md('<div class="cm" style="font-weight:600;margin:0 0 4px">Modifications</div>')
 
         for idx, mod in enumerate(mods):
             if idx > 0:
@@ -81,8 +81,11 @@ def _new_view(store: Store, me: dict) -> None:
             st.rerun()
 
     valid = bool(title.strip()) and all(m["file"] and m["description"].strip() and m["instances"] for m in mods)
-    bc = st.columns([1, 1, 5])
-    if bc[0].button("Create change", type="primary", disabled=not valid):
+    st.write("")
+    with st.container(horizontal=True):
+        do_create = st.button("Create change", type="primary", disabled=not valid, key="create_nc")
+        do_cancel = st.button("Cancel", key="cancel_nc")
+    if do_create:
         try:
             items = [{"file": m["file"], "description": m["description"], "instances": m["instances"]}
                      for m in mods]
@@ -91,7 +94,7 @@ def _new_view(store: Store, me: dict) -> None:
             ui.goto(p="change", id=ch["id"])
         except StoreError as e:
             ui.md(ui.banner("error", ui.esc(e.message)))
-    if bc[1].button("Cancel", key="cancel_nc"):
+    if do_cancel:
         st.session_state.pop("new_mods", None)
         ui.goto(p="changes")
 

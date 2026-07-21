@@ -83,8 +83,9 @@ _COMPONENT_CSS = """
 [data-testid="stSidebarCollapseButton"] { opacity: 1 !important; }
 
 /* row-based selectable tables (Instances): tight hairline rows */
-[class*="st-key-instrow_"] { border-bottom: 1px solid var(--border); padding: 3px 10px; }
-[class*="st-key-insthead"] { border-bottom: 1px solid var(--border-strong); padding: 4px 10px 8px; }
+[class*="st-key-instrow_"] { border-bottom: 1px solid var(--border); padding: 3px 12px; }
+[class*="st-key-insthead"] { border-bottom: 1px solid var(--border); background: var(--raised);
+  padding: 7px 12px; border-radius: 6px 6px 0 0; }
 [class*="st-key-instrow_"] [data-testid="stHorizontalBlock"], [class*="st-key-insthead"] [data-testid="stHorizontalBlock"] { align-items: center; }
 [class*="st-key-instrow_"]:hover { background: var(--raised); }
 [class*="st-key-instrow_"] [data-testid="stCheckbox"], [class*="st-key-insthead"] [data-testid="stCheckbox"] { margin: 0; }
@@ -217,16 +218,23 @@ body { color: var(--text); font-size: 13px; line-height: 1.5; }
 .stButton > button[kind="primary"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .stButton > button[kind="primary"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-/* text / textarea / date / number inputs */
-[data-testid="stTextInput"] input, [data-testid="stTextArea"] textarea, [data-testid="stDateInput"] input,
-[data-testid="stNumberInput"] input { background: var(--bg) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
-[data-testid="stTextArea"] textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.6; }
+/* ---- form controls: ONE height (--ctl-h) across every input type ---- */
+:root { --ctl-h: 40px; }
+[data-testid="stTextInput"] div[data-baseweb="base-input"],
+[data-testid="stNumberInput"] div[data-baseweb="base-input"],
+[data-testid="stDateInput"] div[data-baseweb="base-input"],
+div[data-baseweb="select"] > div {
+  min-height: var(--ctl-h) !important; background: var(--bg) !important;
+  border-color: var(--border-strong) !important; align-items: center; }
+[data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input {
+  min-height: calc(var(--ctl-h) - 2px) !important; background: transparent !important; color: var(--text) !important; }
+[data-testid="stTextArea"] textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
+  background: var(--bg) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
 
 /* select + multiselect (BaseWeb) */
-div[data-baseweb="select"] > div, div[data-baseweb="select"] input { background: var(--bg) !important;
-  border-color: var(--border-strong) !important; color: var(--text) !important; }
+div[data-baseweb="select"] > div { color: var(--text) !important; overflow: visible !important; }
+div[data-baseweb="select"] input { background: transparent !important; color: var(--text) !important; }
 div[data-baseweb="select"] svg { fill: var(--muted); }
-div[data-baseweb="tag"] { background: var(--sel) !important; color: var(--text) !important; border: 1px solid var(--border-strong); }
 div[data-baseweb="popover"] ul, div[data-baseweb="menu"], div[data-baseweb="popover"] div[role="listbox"] {
   background: var(--raised) !important; color: var(--text) !important; }
 div[data-baseweb="popover"] li:hover { background: var(--sel) !important; }
@@ -286,12 +294,14 @@ div[data-testid="stVerticalBlock"] > div[style*="border"] { border-color: var(--
 .cm .kv { display: grid; grid-template-columns: 130px 1fr; gap: 6px 16px; align-items: baseline; }
 .cm .kv .k { color: var(--faint); font-size: 12px; }
 
-/* ---- multiselect tags: don't clip; give the control room ---- */
-div[data-baseweb="select"] > div { min-height: 40px !important; align-items: center; padding: 2px 6px; }
+/* ---- multiselect: placeholder + tags vertically centred, never clipped ---- */
+div[data-baseweb="select"] > div > div:first-child { display: flex !important; align-items: center !important;
+  flex-wrap: wrap; overflow: visible !important; min-height: calc(var(--ctl-h) - 4px); }
 [data-baseweb="tag"] { background: color-mix(in oklch, var(--accent) 20%, var(--surface)) !important;
   color: var(--text) !important; border: 1px solid color-mix(in oklch, var(--accent) 35%, var(--border)) !important;
-  overflow: visible !important; height: auto !important; position: relative; z-index: 1;
-  margin: 3px 6px 3px 3px !important; max-width: none !important; padding: 2px 7px 2px 9px !important; }
+  overflow: visible !important; height: 24px !important; position: relative; z-index: 1;
+  margin: 2px 6px 2px 2px !important; max-width: none !important; padding: 2px 7px 2px 9px !important;
+  align-self: center; }
 [data-baseweb="tag"] span { color: var(--text) !important; overflow: visible !important;
   max-width: none !important; width: auto !important; text-overflow: clip !important; padding: 0 !important; }
 
