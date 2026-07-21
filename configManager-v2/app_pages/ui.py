@@ -218,14 +218,20 @@ body { color: var(--text); font-size: 13px; line-height: 1.5; }
 .stButton > button[kind="primary"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .stButton > button[kind="primary"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
-/* ---- form controls: ONE height (--ctl-h) across every input type ---- */
+/* ---- form controls: ONE height (--ctl-h) AND full-width across every type ---- */
 :root { --ctl-h: 40px; }
+/* every widget fills its column, so text inputs and selects always match */
+[data-testid="stTextInput"], [data-testid="stSelectbox"], [data-testid="stMultiSelect"],
+[data-testid="stDateInput"], [data-testid="stNumberInput"], [data-testid="stTextArea"] { width: 100% !important; }
+[data-testid="stSelectbox"] > div, [data-testid="stMultiSelect"] > div,
+[data-testid="stTextInput"] > div, [data-testid="stDateInput"] > div,
+[data-testid="stNumberInput"] > div, div[data-baseweb="select"] { width: 100% !important; }
 [data-testid="stTextInput"] div[data-baseweb="base-input"],
 [data-testid="stNumberInput"] div[data-baseweb="base-input"],
 [data-testid="stDateInput"] div[data-baseweb="base-input"],
 div[data-baseweb="select"] > div {
-  min-height: var(--ctl-h) !important; background: var(--bg) !important;
-  border-color: var(--border-strong) !important; align-items: center; }
+  min-height: var(--ctl-h) !important; width: 100% !important; box-sizing: border-box;
+  background: var(--bg) !important; border-color: var(--border-strong) !important; align-items: center; }
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input {
   min-height: calc(var(--ctl-h) - 2px) !important; background: transparent !important; color: var(--text) !important; }
 [data-testid="stTextArea"] textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
