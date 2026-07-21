@@ -78,15 +78,17 @@ def _add_instance_form(store: Store, me: dict, instances: list[dict]) -> None:
         env = c[1].selectbox("Environment", ["production", "pilot"], key="ai_env")
         copy_from = c[2].selectbox("Copy files from", [i["code"] for i in instances], key="ai_copy")
         uat = c[3].checkbox("UAT instance", key="ai_uat")
-        bc = st.columns([1, 1, 6])
-        if bc[0].button("Create", type="primary", disabled=not code.strip()):
+        with st.container(horizontal=True):
+            do_create = st.button("Create", type="primary", disabled=not code.strip(), key="create_ai")
+            do_cancel = st.button("Cancel", key="cancel_ai")
+        if do_create:
             try:
                 store.create_instance(code.strip().upper(), env, uat, copy_from, actor=me["windowsId"])
                 st.session_state["show_add_inst"] = False
                 st.rerun()
             except StoreError as e:
                 ui.md(ui.banner("error", ui.esc(e.message)))
-        if bc[1].button("Cancel", key="cancel_ai"):
+        if do_cancel:
             st.session_state["show_add_inst"] = False
             st.rerun()
 

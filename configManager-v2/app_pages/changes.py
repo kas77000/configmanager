@@ -51,7 +51,9 @@ def _new_view(store: Store, me: dict) -> None:
             hc = st.columns([6, 1], vertical_alignment="center")
             hc[0].markdown(f'<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
                            f'letter-spacing:.04em">Modification {idx + 1}</div>', unsafe_allow_html=True)
-            if len(mods) > 1 and hc[1].button("Remove", key=f"rm_mod_{idx}"):
+            # Always render Remove (disabled for the only modification) so the row height —
+            # and the gap down to "Config file" — stays constant as modifications are added.
+            if hc[1].button("Remove", key=f"rm_mod_{idx}", disabled=len(mods) <= 1):
                 mods.pop(idx)
                 st.rerun()
 

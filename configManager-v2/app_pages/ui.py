@@ -83,12 +83,20 @@ _COMPONENT_CSS = """
 [data-testid="stSidebarCollapseButton"] { opacity: 1 !important; }
 
 /* row-based selectable tables (Instances): tight hairline rows */
-[class*="st-key-instrow_"] { border-bottom: 1px solid var(--border); padding: 3px 12px; }
-[class*="st-key-insthead"] { border-bottom: 1px solid var(--border); background: var(--raised);
-  padding: 7px 12px; border-radius: 6px 6px 0 0; }
+/* Instances tables: match the flat hairline look of the admin "Registered instances" table */
+[class*="st-key-instrow_"] { border-bottom: 1px solid var(--border); padding: 4px 16px; }
+[class*="st-key-insthead"] { border-bottom: 1px solid var(--border); padding: 8px 16px; }
 [class*="st-key-instrow_"] [data-testid="stHorizontalBlock"], [class*="st-key-insthead"] [data-testid="stHorizontalBlock"] { align-items: center; }
+/* vertically centre each cell's content within the row */
+[class*="st-key-instrow_"] [data-testid="stColumn"], [class*="st-key-insthead"] [data-testid="stColumn"] { align-self: center; }
+[class*="st-key-instrow_"] .cm, [class*="st-key-insthead"] .cm { display: flex; align-items: center; min-height: 20px; }
 [class*="st-key-instrow_"]:hover { background: var(--raised); }
 [class*="st-key-instrow_"] [data-testid="stCheckbox"], [class*="st-key-insthead"] [data-testid="stCheckbox"] { margin: 0; }
+/* per-row View/Sync buttons rendered as small pills, like the admin 'Edit' action */
+[class*="st-key-instrow_"] .stButton > button { min-height: 28px !important; height: 28px !important;
+  padding: 2px 14px !important; font-size: 12px !important; background: transparent !important;
+  color: var(--muted) !important; border-color: var(--border-strong) !important; }
+[class*="st-key-instrow_"] .stButton > button:hover { background: var(--raised) !important; color: var(--text) !important; }
 [data-testid="stAppViewContainer"] { background: var(--bg); }
 [data-testid="stMainBlockContainer"] { padding: 18px 48px 72px; max-width: 1440px; margin: 0 auto; }
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
@@ -217,17 +225,43 @@ body { color: var(--text); font-size: 13px; line-height: 1.5; }
 .stButton > button:hover, .stDownloadButton > button:hover { background: var(--raised); border-color: var(--border-strong); color: var(--text); }
 .stButton > button[kind="primary"] { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
 .stButton > button[kind="primary"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+/* disabled buttons (e.g. "Sync selected" with nothing ticked) read clearly greyed */
+.stButton > button:disabled, .stButton > button[disabled] { background: var(--surface) !important;
+  color: var(--faint) !important; border-color: var(--border) !important; opacity: 0.6 !important;
+  cursor: not-allowed !important; }
 
-/* ---- form controls: ONE height (--ctl-h) across every input type ---- */
+/* ---- form controls: consistent 40px height + full width (eye-icon-safe) ---- */
 :root { --ctl-h: 40px; }
+/* Streamlit puts the border on a DIFFERENT element per input type (text->root,
+   date->the input, select->the control) at different heights (33/42/40). To make
+   every field one identical 40px box, carry the box (height + border + bg) on the
+   base-input for text/date/number, and strip the stray borders elsewhere. */
 [data-testid="stTextInput"] div[data-baseweb="base-input"],
 [data-testid="stNumberInput"] div[data-baseweb="base-input"],
-[data-testid="stDateInput"] div[data-baseweb="base-input"],
+[data-testid="stDateInput"] div[data-baseweb="base-input"] {
+  min-height: var(--ctl-h) !important; height: var(--ctl-h) !important; box-sizing: border-box !important;
+  width: 100% !important; align-items: center; background: var(--bg) !important;
+  border: none !important; border-radius: var(--radius) !important;
+  /* an inset ring (not a border) so all four sides always show, even if the
+     inner <input> overflows the box */
+  box-shadow: inset 0 0 0 1px var(--border-strong) !important; }
+[data-testid="stTextInput"] div[data-baseweb="base-input"]:focus-within,
+[data-testid="stNumberInput"] div[data-baseweb="base-input"]:focus-within,
+[data-testid="stDateInput"] div[data-baseweb="base-input"]:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent) !important; }
+/* remove the borders Streamlit draws on the wrapper/input so we never double up;
+   match the 40px height so the wrapper doesn't clip the box-shadow ring's top/bottom */
+[data-testid="stTextInputRootElement"] { border: none !important; padding-right: 0 !important;
+  min-height: var(--ctl-h) !important; overflow: visible !important; }
+[data-testid="stDateInput"] input, [data-testid="stDateInput"] input:focus {
+  border: none !important; box-shadow: none !important; }
+[data-testid="stTextInputRootElement"] button { align-self: center !important; margin: 0 6px 0 0 !important; }
+/* select + multiselect control: same 40px box (min-height so multiselect can grow) */
 div[data-baseweb="select"] > div {
-  min-height: var(--ctl-h) !important; background: var(--bg) !important;
-  border-color: var(--border-strong) !important; align-items: center; }
+  min-height: var(--ctl-h) !important; box-sizing: border-box !important; width: 100% !important;
+  align-items: center; background: var(--bg) !important; border-color: var(--border-strong) !important; }
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input {
-  min-height: calc(var(--ctl-h) - 2px) !important; background: transparent !important; color: var(--text) !important; }
+  background: transparent !important; color: var(--text) !important; }
 [data-testid="stTextArea"] textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
   background: var(--bg) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
 
