@@ -362,13 +362,22 @@ def _workspace(store: Store, me: dict, change: dict, target: dict) -> None:
                 with st.container(border=True):
                     _rule_builder(content_key, ver_key, content, int(line_no))
 
-        # Editor with line numbers + warning/error gutter markers
+        # Editor with line numbers + warning/error gutter markers.
+        # auto_update=True so edits register as you type / when you click away — no
+        # "Apply (Ctrl+Enter)" step. The `value` fed to the editor must stay CONSTANT
+        # between keystrokes (streamlit-ace only re-pushes value when it changes, which
+        # would otherwise reset the caret), so we pass a per-mount snapshot and read the
+        # live return separately. A toolbar edit bumps `ver`, which remounts with fresh text.
         annotations = [{"row": max(f.line_number - 1, 0), "column": 0,
                         "text": f"{f.code}: {f.message}", "type": f.severity} for f in findings]
+        mount_key = f"{content_key}__mv{ver}"
+        if mount_key not in st.session_state:
+            st.session_state[mount_key] = content
         new_content = st_ace(
-            value=content, language="ini", theme="tomorrow_night" if dark else "tomorrow",
+            value=st.session_state[mount_key], language="ini",
+            theme="tomorrow_night" if dark else "tomorrow",
             key=f"ace_{content_key}_{ver}", annotations=annotations, height=430, font_size=13,
-            show_gutter=True, wrap=False, auto_update=False, readonly=merged,
+            show_gutter=True, wrap=False, auto_update=True, readonly=merged,
             placeholder="config content",
         )
         if new_content is not None and new_content != content:

@@ -17,16 +17,16 @@ def _request_card(store: Store, me: dict, c: dict, decide: bool) -> None:
             unsafe_allow_html=True)
         if decide:
             with head[1]:
-                bcols = st.columns(2)
-                if bcols[0].button("Approve", key=f"appr_{c['id']}", type="primary"):
-                    try:
-                        store.approve_change(c["id"], me["windowsId"])
+                with st.container(horizontal=True, horizontal_alignment="right"):
+                    if st.button("Approve", key=f"appr_{c['id']}", type="primary"):
+                        try:
+                            store.approve_change(c["id"], me["windowsId"])
+                            st.rerun()
+                        except StoreError as e:
+                            st.session_state[f"req_err_{c['id']}"] = e.message
+                    if st.button("Reject", key=f"rej_{c['id']}"):
+                        st.session_state[f"show_reject_{c['id']}"] = not st.session_state.get(f"show_reject_{c['id']}")
                         st.rerun()
-                    except StoreError as e:
-                        st.session_state[f"req_err_{c['id']}"] = e.message
-                if bcols[1].button("Reject", key=f"rej_{c['id']}"):
-                    st.session_state[f"show_reject_{c['id']}"] = not st.session_state.get(f"show_reject_{c['id']}")
-                    st.rerun()
 
         rows = "".join(
             f'<tr><td class="mono" style="font-weight:600;width:38%">{ui.esc(it["file"])}</td>'

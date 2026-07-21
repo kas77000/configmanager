@@ -262,6 +262,10 @@ div[data-baseweb="select"] > div {
   align-items: center; background: var(--bg) !important; border-color: var(--border-strong) !important; }
 [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input, [data-testid="stDateInput"] input {
   background: transparent !important; color: var(--text) !important; }
+/* placeholders readable in BOTH themes (light default was too faint) */
+input::placeholder, textarea::placeholder { color: var(--faint) !important; opacity: 1 !important; }
+div[data-baseweb="select"] [data-baseweb="placeholder"],
+div[data-baseweb="select"] [class*="placeholder"] { color: var(--faint) !important; opacity: 1 !important; }
 [data-testid="stTextArea"] textarea { font-family: var(--font-mono); font-size: 12px; line-height: 1.6;
   background: var(--bg) !important; border-color: var(--border-strong) !important; color: var(--text) !important; }
 
