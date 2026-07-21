@@ -1,7 +1,8 @@
-"""Instances dashboard (`/`) — instances grouped by environment, with sync.
+"""Instances dashboard (`/`) — instances grouped by environment.
 
-Selection uses real st.checkbox widgets (in-session reruns, no full-page reload),
-so ticking instances is smooth. "Sync selected" acts on the ticked rows."""
+Dense hairline rows (styled to match the Instances-admin table) with real
+widgets: a selection checkbox plus per-row View and Sync buttons. Selection and
+sync run in-session (no full-page reload), so the page stays smooth."""
 from __future__ import annotations
 
 import streamlit as st
@@ -12,9 +13,9 @@ from core.store import Store, StoreError
 
 def _sync_status_html(res: dict) -> str:
     if res is None:
-        return ""
+        return '<span class="faint">—</span>'
     if res.get("error"):
-        return ui.badge("error", res["error"][:40])
+        return ui.badge("error", res["error"][:36])
     if res.get("updated"):
         return ui.badge("success", "Updated", glyph="✓")
     return ui.badge("neutral", "In sync", glyph="✓")
@@ -26,6 +27,19 @@ def _do_sync(store: Store, me: dict, codes: list[str], results: dict) -> None:
             results[c] = store.sync(c, actor=me["windowsId"])
         except StoreError as e:
             results[c] = {"error": e.message}
+
+
+_COLS = [0.45, 1.4, 2.2, 2.1, 2.2]
+_LABELS = ["", "Instance", "Environment", "Sync", ""]
+
+
+def _header(env: str) -> None:
+    with st.container(key=f"insthead_{env}"):
+        h = st.columns(_COLS, vertical_alignment="center")
+        for i, lbl in enumerate(_LABELS):
+            if lbl:
+                h[i].markdown(f'<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
+                              f'letter-spacing:.04em">{lbl}</div>', unsafe_allow_html=True)
 
 
 def render(store: Store, me: dict) -> None:
@@ -52,24 +66,22 @@ def render(store: Store, me: dict) -> None:
               f'<span class="count-chip">{len(group)}</span></div>')
 
         with st.container(border=True):
-            with st.container(key=f"insthead_{env}"):
-                h = st.columns([0.5, 2, 3, 2.5], vertical_alignment="center")
-                h[1].markdown('<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
-                              'letter-spacing:.04em">Instance</div>', unsafe_allow_html=True)
-                h[2].markdown('<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
-                              'letter-spacing:.04em">Environment</div>', unsafe_allow_html=True)
-                h[3].markdown('<div class="cm faint" style="font-size:11px;text-transform:uppercase;'
-                              'letter-spacing:.04em">Sync</div>', unsafe_allow_html=True)
-
+            _header(env)
             for inst in group:
                 code = inst["code"]
                 with st.container(key=f"instrow_{code}"):
-                    rc = st.columns([0.5, 2, 3, 2.5], vertical_alignment="center")
+                    rc = st.columns(_COLS, vertical_alignment="center")
                     rc[0].checkbox("select", key=f"inst_sel_{code}", label_visibility="collapsed")
                     with rc[1]:
-                        ui.md(f'<a class="mono" style="font-weight:600;color:var(--text);'
-                              f'text-decoration:none" href="{ui.href(p="instance", code=code)}">{code}</a>')
+                        ui.md(f'<span class="mono" style="font-weight:600">{code}</span>')
                     with rc[2]:
                         ui.md(ui.env_tag(inst))
                     with rc[3]:
                         ui.md(_sync_status_html(results.get(code)))
+                    with rc[4]:
+                        bc = st.columns(2)
+                        if bc[0].button("View", key=f"view_{code}", use_container_width=True):
+                            ui.goto(p="instance", code=code)
+                        if bc[1].button("Sync", key=f"sync_{code}", use_container_width=True):
+                            _do_sync(store, me, [code], results)
+                            st.rerun()

@@ -2,10 +2,11 @@
 from __future__ import annotations
 
 import streamlit as st
+from streamlit_ace import st_ace
 
 from . import ui
 from core.store import Store, StoreError, can_edit, can_approve, is_admin, MANAGED_FILE
-from core.rules import analyze_text, severity_counts, parse_file
+from core.rules import analyze_text, severity_counts, parse_file, KNOWN_FIELDS
 
 FIXMSG = MANAGED_FILE
 _MERGE_MSG = {
@@ -38,50 +39,42 @@ def _approval_bar(store: Store, me: dict, change: dict) -> None:
                     f'{ui.rel_time(d["at"])}{reason}</span>')
 
     with st.container(border=True):
-        ui.md('<div class="rowflex" style="flex-wrap:wrap">' + " ".join(left) + "</div>")
+        ui.md('<div class="rowflex" style="flex-wrap:wrap;margin-bottom:10px">' + " ".join(left) + "</div>")
         merged_any = status == "merged" or any(t.get("mergedCommit") for t in change["targets"])
-        btns = st.columns(6)
-        i = 0
-        if editor and status in ("draft", "rejected"):
-            if btns[i].button("Submit for approval", type="primary", key="submit_ch"):
-                try:
-                    store.submit_change(cid, me["windowsId"]); st.rerun()
-                except StoreError as e:
-                    st.session_state["ch_err"] = e.message
-            i += 1
-        if editor and status not in ("cancelled", "rejected") and not merged_any:
-            if st.session_state.get("confirm_cancel"):
-                if btns[i].button("Confirm cancel", key="cc_yes"):
+
+        with st.container(horizontal=True):
+            if editor and status in ("draft", "rejected"):
+                if st.button("Submit for approval", type="primary", key="submit_ch"):
                     try:
-                        store.cancel_change(cid, me["windowsId"])
+                        store.submit_change(cid, me["windowsId"]); st.rerun()
                     except StoreError as e:
                         st.session_state["ch_err"] = e.message
-                    st.session_state["confirm_cancel"] = False; st.rerun()
-                i += 1
-                if btns[i].button("Keep", key="cc_no"):
-                    st.session_state["confirm_cancel"] = False; st.rerun()
-                i += 1
-            else:
-                if btns[i].button("Cancel change", key="cancel_ch"):
-                    st.session_state["confirm_cancel"] = True; st.rerun()
-                i += 1
-        if approver and status == "submitted":
-            if btns[i].button("Approve", key="approve_ch", type="primary"):
-                store.approve_change(cid, me["windowsId"]); st.rerun()
-            i += 1
-            if btns[i].button("Reject", key="reject_ch"):
-                st.session_state["show_reject_ch"] = not st.session_state.get("show_reject_ch"); st.rerun()
-            i += 1
-
-        # Emails
-        if editor and status == "submitted":
-            eml, name = store.build_email(cid, "approval", me)
-            st.download_button("Approval email…", data=eml, file_name=name, mime="message/rfc822",
-                              key="dl_approval")
-        if editor and status == "merged":
-            eml, name = store.build_email(cid, "recap", me)
-            st.download_button("Recap email…", data=eml, file_name=name, mime="message/rfc822",
-                              key="dl_recap")
+            if approver and status == "submitted":
+                if st.button("Approve", key="approve_ch", type="primary"):
+                    store.approve_change(cid, me["windowsId"]); st.rerun()
+                if st.button("Reject", key="reject_ch"):
+                    st.session_state["show_reject_ch"] = not st.session_state.get("show_reject_ch"); st.rerun()
+            if editor and status == "submitted":
+                eml, name = store.build_email(cid, "approval", me)
+                st.download_button("Approval email…", data=eml, file_name=name, mime="message/rfc822",
+                                  key="dl_approval")
+            if editor and status == "merged":
+                eml, name = store.build_email(cid, "recap", me)
+                st.download_button("Recap email…", data=eml, file_name=name, mime="message/rfc822",
+                                  key="dl_recap")
+            if editor and status not in ("cancelled", "rejected") and not merged_any:
+                if st.session_state.get("confirm_cancel"):
+                    if st.button("Confirm cancel", key="cc_yes"):
+                        try:
+                            store.cancel_change(cid, me["windowsId"])
+                        except StoreError as e:
+                            st.session_state["ch_err"] = e.message
+                        st.session_state["confirm_cancel"] = False; st.rerun()
+                    if st.button("Keep", key="cc_no"):
+                        st.session_state["confirm_cancel"] = False; st.rerun()
+                else:
+                    if st.button("Cancel change", key="cancel_ch"):
+                        st.session_state["confirm_cancel"] = True; st.rerun()
 
         if st.session_state.get("show_reject_ch") and approver and status == "submitted":
             reason = st.text_input("Reason (optional)", key="reject_reason_ch",
@@ -201,6 +194,111 @@ def _merge_panel(store: Store, me: dict, change: dict, target: dict, any_dirty: 
 
 
 # ---------------------------------------------------------------------------
+# Line operations + rule builder (the editor toolbar, ported from the original)
+# ---------------------------------------------------------------------------
+
+_OPS = ["=", "!=", "<", ">", "<=", ">=", "~", "!~"]
+
+
+def _set_content(content_key: str, ver_key: str, text: str) -> None:
+    st.session_state[content_key] = text
+    st.session_state[ver_key] = st.session_state.get(ver_key, 0) + 1
+    st.rerun()
+
+
+def _comment_line(content: str, n: int) -> str:
+    lines = content.split("\n")
+    i = n - 1
+    if 0 <= i < len(lines) and not lines[i].lstrip().startswith("#"):
+        lines[i] = "#" + lines[i]
+    return "\n".join(lines)
+
+
+def _uncomment_line(content: str, n: int) -> str:
+    lines = content.split("\n")
+    i = n - 1
+    if 0 <= i < len(lines) and lines[i].lstrip().startswith("#"):
+        lines[i] = lines[i].replace("#", "", 1)
+    return "\n".join(lines)
+
+
+def _delete_line(content: str, n: int) -> str:
+    lines = content.split("\n")
+    i = n - 1
+    if 0 <= i < len(lines):
+        del lines[i]
+    return "\n".join(lines)
+
+
+def _insert_after(content: str, n: int, text: str) -> str:
+    lines = content.split("\n")
+    lines.insert(min(max(n, 0), len(lines)), text)
+    return "\n".join(lines)
+
+
+def _build_rule(algo: str, tags: list, conditions: list) -> str:
+    outs = []
+    if algo.strip():
+        outs.append(f"9001={algo.strip()}")
+    tag_parts = [f"{t.strip()}={v.strip()}" for t, v in tags if t.strip()]
+    if tag_parts:
+        outs.append("9012=" + "^".join(tag_parts))
+    lhs = ";".join(outs)
+    conds = ", ".join(f"{f.strip()}{op}{v.strip()}" for f, op, v in conditions if f.strip())
+    return f"{lhs} :: {conds}" if conds else lhs
+
+
+def _rule_builder(content_key: str, ver_key: str, content: str, line_no: int) -> None:
+    tags = st.session_state.setdefault("rb_tags", [["", ""]])
+    conds = st.session_state.setdefault("rb_conds", [["", "=", ""]])
+
+    ui.md('<div class="insp-label" style="margin-top:0">Tags to set (9012)</div>')
+    for i, (t, v) in enumerate(tags):
+        c = st.columns([2, 2, 0.6], vertical_alignment="bottom")
+        tags[i][0] = c[0].text_input("tag", value=t, key=f"rb_t_{i}", placeholder="tag (e.g. 144)",
+                                    label_visibility="collapsed")
+        tags[i][1] = c[1].text_input("val", value=v, key=f"rb_v_{i}", placeholder="value",
+                                    label_visibility="collapsed")
+        if len(tags) > 1 and c[2].button("✕", key=f"rb_tx_{i}"):
+            tags.pop(i)
+            st.rerun()
+    if st.button("＋ tag", key="rb_addtag"):
+        tags.append(["", ""])
+        st.rerun()
+
+    algo = st.text_input("Algo (9001) — optional", key="rb_algo", placeholder="e.g. VWAP")
+
+    ui.md('<div class="insp-label">Conditions (all must hold)</div>')
+    for i, (f, op, v) in enumerate(conds):
+        c = st.columns([2, 1, 2, 0.6], vertical_alignment="bottom")
+        conds[i][0] = c[0].text_input("field", value=f, key=f"rb_f_{i}", placeholder="field",
+                                     label_visibility="collapsed")
+        conds[i][1] = c[1].selectbox("op", _OPS, index=_OPS.index(op), key=f"rb_op_{i}",
+                                    label_visibility="collapsed")
+        conds[i][2] = c[2].text_input("cv", value=v, key=f"rb_cv_{i}", placeholder="value (^ = OR)",
+                                     label_visibility="collapsed")
+        if len(conds) > 1 and c[3].button("✕", key=f"rb_cx_{i}"):
+            conds.pop(i)
+            st.rerun()
+    if st.button("＋ condition", key="rb_addcond"):
+        conds.append(["", "=", ""])
+        st.rerun()
+
+    preview = _build_rule(algo, tags, conds)
+    ui.md(f'<div class="insp-label">Preview</div>'
+          f'<pre class="config" style="max-height:80px">{ui.esc(preview or "(empty)")}</pre>')
+    bc = st.columns([1, 1, 4])
+    if bc[0].button("Insert rule", type="primary", key="rb_insert", disabled=not preview):
+        st.session_state["rb_tags"] = [["", ""]]
+        st.session_state["rb_conds"] = [["", "=", ""]]
+        st.session_state["show_rule_builder"] = False
+        _set_content(content_key, ver_key, _insert_after(content, line_no, preview))
+    if bc[1].button("Cancel", key="rb_cancel"):
+        st.session_state["show_rule_builder"] = False
+        st.rerun()
+
+
+# ---------------------------------------------------------------------------
 # Instance workspace
 # ---------------------------------------------------------------------------
 
@@ -209,27 +307,80 @@ def _workspace(store: Store, me: dict, change: dict, target: dict) -> None:
     files = target["files"]
     merged = bool(target.get("mergedCommit"))
     editor = can_edit(me["roles"])
+    dark = st.session_state.get("theme", "dark") == "dark"
 
-    # file selector
     if len(files) > 1:
         active_file = st.segmented_control("File", files, default=files[0],
                                           key=f"file_{change['id']}_{code}") or files[0]
     else:
         active_file = files[0]
 
-    committed = store.change_read_file(change["id"], code, active_file)["content"]
-    ed_key = f"ed_{change['id']}_{code}_{active_file}"
+    try:
+        committed = store.change_read_file(change["id"], code, active_file)["content"]
+    except Exception:
+        ui.md(ui.banner("error", f"Could not read <b>{ui.esc(active_file)}</b> for this change on "
+                              f"{ui.esc(code)}. The working branch may be missing (try resetting the "
+                              "data, or re-create the change)."))
+        return
+    content_key = f"ed_{change['id']}_{code}_{active_file}"
+    ver_key = f"ver_{content_key}"
+    if content_key not in st.session_state:
+        st.session_state[content_key] = committed
+    content = st.session_state[content_key]
+    ver = st.session_state.get(ver_key, 0)
+    n_lines = content.count("\n") + 1
+
+    findings = analyze_text(content) if active_file == FIXMSG else []
 
     left, right = st.columns([2, 1])
     with left:
-        content = st.text_area("Config", value=committed, key=ed_key, height=440,
-                              disabled=merged, label_visibility="collapsed")
+        # Toolbar: line operations (operate on the chosen line)
+        if not merged and editor:
+            t1 = st.columns([1.3, 1, 1, 1], vertical_alignment="bottom")
+            line_no = t1[0].number_input("Line", min_value=1, max_value=max(n_lines, 1), value=1,
+                                        step=1, key=f"ln_{content_key}")
+            if t1[1].button("Comment", key=f"cm_{content_key}", use_container_width=True):
+                _set_content(content_key, ver_key, _comment_line(content, int(line_no)))
+            if t1[2].button("Uncomment", key=f"un_{content_key}", use_container_width=True):
+                _set_content(content_key, ver_key, _uncomment_line(content, int(line_no)))
+            if t1[3].button("Delete line", key=f"dl_{content_key}", use_container_width=True):
+                _set_content(content_key, ver_key, _delete_line(content, int(line_no)))
+
+            t2 = st.columns([3, 1.2, 1.3], vertical_alignment="bottom")
+            new_comment = t2[0].text_input("Add comment", key=f"ac_{content_key}",
+                                          placeholder="comment text (inserted after the line)",
+                                          label_visibility="collapsed")
+            if t2[1].button("Insert #", key=f"ic_{content_key}", use_container_width=True,
+                           disabled=not new_comment.strip()):
+                _set_content(content_key, ver_key, _insert_after(content, int(line_no), "# " + new_comment.strip()))
+            if active_file == FIXMSG and t2[2].button("Add rule…", type="primary",
+                                                     key=f"ar_{content_key}", use_container_width=True):
+                st.session_state["show_rule_builder"] = not st.session_state.get("show_rule_builder", False)
+                st.rerun()
+
+            if st.session_state.get("show_rule_builder") and active_file == FIXMSG:
+                with st.container(border=True):
+                    _rule_builder(content_key, ver_key, content, int(line_no))
+
+        # Editor with line numbers + warning/error gutter markers
+        annotations = [{"row": max(f.line_number - 1, 0), "column": 0,
+                        "text": f"{f.code}: {f.message}", "type": f.severity} for f in findings]
+        new_content = st_ace(
+            value=content, language="ini", theme="tomorrow_night" if dark else "tomorrow",
+            key=f"ace_{content_key}_{ver}", annotations=annotations, height=430, font_size=13,
+            show_gutter=True, wrap=False, auto_update=False, readonly=merged,
+            placeholder="config content",
+        )
+        if new_content is not None and new_content != content:
+            st.session_state[content_key] = new_content
+            content = new_content
+
         dirty = content != committed
-        tools = st.columns([3, 1, 1])
-        msg = tools[0].text_input("Commit message", key=f"msg_{ed_key}",
-                                 placeholder="commit message", label_visibility="collapsed")
-        if tools[1].button("Save", type="primary", disabled=(not dirty) or merged or not editor,
-                          key=f"save_{ed_key}"):
+        sc = st.columns([3, 1, 1], vertical_alignment="bottom")
+        msg = sc[0].text_input("Commit message", key=f"msg_{content_key}",
+                              placeholder="commit message", label_visibility="collapsed")
+        if sc[1].button("Save", type="primary", disabled=(not dirty) or merged or not editor,
+                       key=f"save_{content_key}", use_container_width=True):
             try:
                 author = {"name": me["displayName"], "email": me["email"] or f"{me['windowsId']}@local"}
                 store.change_put_file(change["id"], code, active_file, content,
@@ -237,23 +388,23 @@ def _workspace(store: Store, me: dict, change: dict, target: dict) -> None:
                 st.rerun()
             except StoreError as ex:
                 ui.md(ui.banner("error", ui.esc(ex.message)))
-        show_diff = tools[2].toggle("Diff", value=True, key=f"diff_{ed_key}")
+        show_diff = sc[2].toggle("Diff", value=True, key=f"diff_{content_key}")
 
     with right:
         if active_file == FIXMSG:
-            findings = analyze_text(content)
-            counts = severity_counts(findings)
-            ui.md(f'<div class="insp-label">Warnings '
+            ui.md(f'<div class="insp-label" style="margin-top:0">Warnings '
                   f'<span class="count-chip">{len(findings)}</span></div>')
             _warnings_rail(findings)
         else:
             ui.md('<div class="faint">Shadow-analysis applies to ai.fixmsg.properties. This file is '
                   'versioned and diffed without rule checks.</div>')
 
-    # dirty across all files of this target
     any_dirty = False
     for f in files:
-        c = store.change_read_file(change["id"], code, f)["content"]
+        try:
+            c = store.change_read_file(change["id"], code, f)["content"]
+        except Exception:
+            continue
         k = f"ed_{change['id']}_{code}_{f}"
         if k in st.session_state and st.session_state[k] != c:
             any_dirty = True

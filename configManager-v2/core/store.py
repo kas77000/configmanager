@@ -373,11 +373,17 @@ class Store:
     # =====================================================================
     # Settings (admin)
     # =====================================================================
+    def _sa_user(self) -> str:
+        return self.settings.get("serviceAccountUser") or self.service_account_user
+
+    def _sa_password(self) -> str:
+        return self.settings.get("serviceAccountPassword") or self.service_account_password
+
     def settings_view(self) -> dict:
         return {
             "quantDistributionEmail": self.settings.get("quantDistributionEmail", ""),
-            "serviceAccountUser": self.service_account_user,
-            "serviceAccountConfigured": len(self.service_account_password) > 0,
+            "serviceAccountUser": self._sa_user(),
+            "serviceAccountConfigured": len(self._sa_password()) > 0,
             "vcsBackend": self.backend,
             "gitAvailable": git_available(),
         }
@@ -385,6 +391,22 @@ class Store:
     def update_settings(self, patch: dict) -> dict:
         if "quantDistributionEmail" in patch:
             self.settings["quantDistributionEmail"] = str(patch["quantDistributionEmail"]).strip()
+        self._save("settings", self.settings)
+        return self.settings_view()
+
+    def update_service_account(self, user: Optional[str] = None,
+                               password: Optional[str] = None) -> dict:
+        """Configure the service account from the UI. The password is stored in the
+        local data dir (gitignored) and never returned to the client."""
+        if user is not None:
+            self.settings["serviceAccountUser"] = str(user).strip()
+        if password is not None and password != "":
+            self.settings["serviceAccountPassword"] = str(password)
+        self._save("settings", self.settings)
+        return self.settings_view()
+
+    def clear_service_account_password(self) -> dict:
+        self.settings["serviceAccountPassword"] = ""
         self._save("settings", self.settings)
         return self.settings_view()
 

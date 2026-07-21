@@ -17,16 +17,25 @@ _BACKEND_DESC = {
 # Panels
 # ---------------------------------------------------------------------------
 
-def _service_account_panel(sv: dict) -> None:
+def _service_account_panel(store: Store, sv: dict) -> None:
     badge = ui.badge("success", "configured", glyph="✓") if sv["serviceAccountConfigured"] \
         else ui.badge("warning", "not configured")
-    user = f'<span class="mono">{ui.esc(sv["serviceAccountUser"])}</span>' if sv["serviceAccountUser"] \
-        else '<span class="faint">not set</span>'
-    ui.md('<div class="panel panel-pad"><div class="cm">'
-          f'<div class="rowflex" style="margin-bottom:10px"><b>Service account</b> {badge}</div>'
-          f'<div class="kv"><div class="k">Username</div><div>{user}</div></div>'
-          '<div class="faint" style="font-size:11px;margin-top:8px">Used only to reach server-type '
-          'instances. Shared drives need no credentials.</div></div></div>')
+    with st.container(border=True):
+        ui.md(f'<div class="cm"><div class="rowflex" style="margin-bottom:2px"><b>Service account</b> '
+              f'{badge}</div><div class="faint" style="font-size:11px">Used only to reach server-type '
+              'instances. Shared drives need no credentials. The password is stored locally and never '
+              'shown again.</div></div>')
+        user = st.text_input("Username", value=sv["serviceAccountUser"], key="sa_user",
+                            placeholder="DOMAIN\\svc-config")
+        pwd = st.text_input("Password", value="", type="password", key="sa_pwd",
+                           placeholder="•••••••• (leave blank to keep current)")
+        bc = st.columns([1, 1, 4])
+        if bc[0].button("Save", type="primary", key="sa_save"):
+            store.update_service_account(user=user, password=pwd or None)
+            st.rerun()
+        if sv["serviceAccountConfigured"] and bc[1].button("Clear password", key="sa_clear"):
+            store.clear_service_account_password()
+            st.rerun()
 
 
 def _vcs_panel(store: Store, me: dict, sv: dict) -> None:
@@ -184,7 +193,7 @@ def _list_view(store: Store, me: dict) -> None:
     sv = store.settings_view()
     cols = st.columns(2)
     with cols[0]:
-        _service_account_panel(sv)
+        _service_account_panel(store, sv)
     with cols[1]:
         _vcs_panel(store, me, sv)
 
