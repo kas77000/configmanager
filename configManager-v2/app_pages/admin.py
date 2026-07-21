@@ -1,6 +1,8 @@
 """Instances admin (`/admin`) — dense list; per-instance editing on a sub-view."""
 from __future__ import annotations
 
+import json
+
 import streamlit as st
 
 from . import ui
@@ -10,6 +12,14 @@ _BACKEND_LABEL = {"builtin": "Built-in (dependency-free)", "git": "Official git"
 _BACKEND_DESC = {
     "builtin": "Version history stored as JSON in data/. No external tools; runs anywhere.",
     "git": "Version history in a real .git repo (data/config-repo). Inspectable with git tooling.",
+}
+_RESET_LABEL = {"history": "Config history + changes", "all": "Everything (factory reset)"}
+_RESET_WARN = {
+    "history": "Resets the config version history and <b>every change</b> (drafts, submitted, "
+               "merged). Users, the instances registry, settings, and the audit log are kept.",
+    "all": "Factory reset — also clears <b>users, instances, settings, and the audit log</b>. "
+           "The next visitor becomes admin, the backend returns to built-in, and the service "
+           "account is cleared.",
 }
 
 
@@ -64,6 +74,71 @@ def _vcs_panel(store: Store, me: dict, sv: dict) -> None:
             try:
                 store.switch_vcs_backend(choice, actor=me["windowsId"])
                 st.session_state.pop("vcs_confirm", None)
+                st.rerun()
+            except StoreError as e:
+                ui.md(ui.banner("error", ui.esc(e.message)))
+
+
+def _import_export_panel(store: Store, me: dict) -> None:
+    with st.container(border=True):
+        ui.md('<div class="cm"><b>Import / export</b> <span class="faint">— move the instance '
+              "registry (settings, files, and paths — not the config contents) between "
+              "environments, or keep a backup.</span></div>")
+
+        # Show the outcome of the last import (created / already-exists / errors), once.
+        res = st.session_state.pop("inst_import_result", None)
+        if res:
+            if res.get("error"):
+                ui.md(ui.banner("error", ui.esc(res["error"])))
+            if res.get("created"):
+                ui.md(ui.banner("success", "Imported: <b>" + ui.esc(", ".join(res["created"])) + "</b>."))
+            if res.get("skipped"):
+                ui.md(ui.banner("warning", "Already exist, so skipped (an instance with that name "
+                                "is already registered): <b>" + ui.esc(", ".join(res["skipped"])) + "</b>."))
+            if res.get("errors"):
+                ui.md(ui.banner("error", "Could not import: " + ui.esc("; ".join(res["errors"]))))
+
+        # Export: full-width buttons stacked, then the uploader gets the whole panel
+        # width (a narrow half-column makes Streamlit's dropzone text overlap).
+        ec = st.columns(2)
+        if ec[0].button("Prepare export", key="inst_exp_prep", use_container_width=True):
+            st.session_state["inst_export_json"] = json.dumps(store.export_instances(), indent=2)
+            st.rerun()
+        if st.session_state.get("inst_export_json"):
+            ec[1].download_button("Download instances.json", key="inst_exp_dl",
+                                  data=st.session_state["inst_export_json"], file_name="instances.json",
+                                  mime="application/json", use_container_width=True)
+
+        up = st.file_uploader("Import a JSON export", type=["json"], key="inst_imp_up")
+        if st.button("Import", type="primary", disabled=up is None,
+                     key="inst_imp_go", use_container_width=True):
+            try:
+                payload = json.loads(up.getvalue().decode("utf-8"))
+                st.session_state["inst_import_result"] = store.import_instances(
+                    payload, actor=me["windowsId"])
+            except json.JSONDecodeError:
+                st.session_state["inst_import_result"] = {"error": "That file is not valid JSON."}
+            except StoreError as e:
+                st.session_state["inst_import_result"] = {"error": e.message}
+            st.rerun()
+
+
+def _reset_panel(store: Store, me: dict) -> None:
+    with st.container(border=True):
+        ui.md('<div class="cm"><div class="rowflex" style="margin-bottom:2px"><b>Reset data</b> '
+              f'{ui.badge("warning", "destructive")}</div><div class="faint" style="font-size:11px">'
+              'Wipes app data and re-seeds from the seed config. Takes effect immediately — no '
+              'restart needed. (The <span class="mono">python reset.py</span> CLI does the same '
+              'when the app is stopped.)</div></div>')
+        scope = st.selectbox("Scope", ["history", "all"],
+                            format_func=lambda s: _RESET_LABEL[s], key="reset_scope")
+        ui.md(ui.banner("warning", _RESET_WARN[scope]))
+        confirm = st.text_input("Type RESET to confirm", key="reset_confirm", placeholder="RESET")
+        if st.button("Reset now", type="primary",
+                    disabled=confirm.strip().upper() != "RESET", key="reset_go"):
+            try:
+                store.reset_data(scope, actor=me["windowsId"])
+                st.session_state.pop("reset_confirm", None)
                 st.rerun()
             except StoreError as e:
                 ui.md(ui.banner("error", ui.esc(e.message)))
@@ -196,8 +271,10 @@ def _list_view(store: Store, me: dict) -> None:
     cols = st.columns(2)
     with cols[0]:
         _service_account_panel(store, sv)
+        _reset_panel(store, me)
     with cols[1]:
         _vcs_panel(store, me, sv)
+        _import_export_panel(store, me)
 
     rows = []
     for inst in instances:

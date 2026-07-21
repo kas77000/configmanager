@@ -102,6 +102,9 @@ _COMPONENT_CSS = """
 [data-testid="stSidebar"] { background: var(--surface); border-right: 1px solid var(--border); }
 [data-testid="stSidebarUserContent"] { padding-top: 8px; }
 html, body, [data-testid="stAppViewContainer"] * { font-family: var(--font-sans); }
+/* ...but never override Streamlit's Material Symbols icon font, or ligature icons
+   (upload, chevrons, etc.) render as their literal source text and overlap labels. */
+[data-testid="stIconMaterial"] { font-family: "Material Symbols Rounded" !important; }
 body { color: var(--text); font-size: 13px; line-height: 1.5; }
 
 /* ---- headings & text helpers ---- */
@@ -186,6 +189,7 @@ body { color: var(--text); font-size: 13px; line-height: 1.5; }
 .cm .banner.error { background: color-mix(in oklch, var(--error) 8%, transparent); border-color: var(--error); color: var(--text); }
 .cm .banner.warning { background: color-mix(in oklch, var(--warning) 8%, transparent); border-color: var(--warning); color: var(--text); }
 .cm .banner.info { background: color-mix(in oklch, var(--info) 8%, transparent); border-color: var(--info); color: var(--text); }
+.cm .banner.success { background: color-mix(in oklch, var(--success) 8%, transparent); border-color: var(--success); color: var(--text); }
 .cm .banner .g { color: inherit; }
 .cm .empty { text-align: center; color: var(--muted); padding: 40px 16px; }
 

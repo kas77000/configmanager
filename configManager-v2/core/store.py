@@ -278,6 +278,51 @@ class Store:
         self._seed_live()
         self._audit(actor, "switch-vcs-backend", details={"from": previous, "to": target})
 
+    def reset_data(self, scope: str = "all", actor: str = "system") -> None:
+        """Wipe app data and re-seed in place. Because the Store is held in memory
+        (@st.cache_resource), this is what makes an in-app reset take effect without a
+        process restart — the running app sees fresh data on its next rerun. Scopes:
+
+          - "history": versioned state only — the config history and every change are
+            reset from the seed. Users, the instances registry, settings (incl. the
+            service account and backend choice), and the audit log are kept.
+          - "all": factory reset — additionally clears users, instances, settings, and
+            the audit log. The next visitor becomes admin, the backend returns to
+            built-in, and the service account is cleared.
+        """
+        if scope not in ("history", "all"):
+            raise StoreError("unknown reset scope")
+
+        # Both scopes drop the versioned state (either backend) and the live snapshot.
+        self.changes = []
+        self.live = {}
+        _force_rmtree(self.git_dir)
+        if self.git_dir.exists():
+            raise StoreError("could not remove the git repo (data/config-repo); "
+                             "close anything using it and try again")
+        if self._paths["repo"].exists():
+            self._paths["repo"].unlink()
+
+        if scope == "all":
+            self.users = []
+            self.instances = []
+            self.audit = []
+            self.settings = {"quantDistributionEmail": "", "vcsBackend": "builtin"}
+            self.service_account_user = ""
+            self.service_account_password = ""
+            self._save("users", self.users)
+            self._save("instances", self.instances)
+            self._save("audit", self.audit)
+
+        # Re-derive the backend from (possibly reset) settings, then re-seed everything.
+        self.backend = self._resolve_backend()
+        self.repo = self._make_repo(self.backend)
+        self._save("settings", self.settings)
+        self._save("changes", self.changes)
+        self._save("live", self.live)
+        self._bootstrap()
+        self._audit(actor, "reset-data", details={"scope": scope})
+
     # -- audit -------------------------------------------------------------
     def _audit(self, windows_id: str, action: str, branch: Optional[str] = None,
                commit: Optional[str] = None, details: Optional[dict] = None) -> None:
@@ -546,6 +591,106 @@ class Store:
         except Exception:
             raise StoreError("file not found on instance")
         return {"instance": code, "file": file, "content": content}
+
+    # -- import / export ---------------------------------------------------
+    def export_instances(self) -> dict:
+        """Portable snapshot of the instance registry: environment, UAT, location type,
+        server address, managed file names, and each file's path. Config file *contents*
+        are deliberately not included — only the paths that point at them."""
+        out = []
+        for inst in self.instances:
+            out.append({
+                "code": inst["code"],
+                "environment": inst["environment"],
+                "uat": bool(inst.get("uat", False)),
+                "locationType": inst.get("locationType", "server"),
+                "serverAddress": inst.get("serverAddress", ""),
+                "files": list(inst["files"]),
+                "paths": dict(inst.get("paths", {})),
+            })
+        return {"version": 1, "exportedAt": now_iso(), "instances": out}
+
+    def import_instances(self, payload, actor: str = "") -> dict:
+        """Create instances from an export. Existing codes are left untouched and
+        reported as skipped (an instance with that name already exists). Returns
+        {created, skipped, errors} so the caller can report per-instance outcomes."""
+        if isinstance(payload, list):
+            entries = payload
+        elif isinstance(payload, dict) and isinstance(payload.get("instances"), list):
+            entries = payload["instances"]
+        else:
+            raise StoreError("not a valid instances export (expected an 'instances' list)")
+
+        author = {"name": "Configuration Manager", "email": "config-manager@local"}
+        created, skipped, errors = [], [], []
+        for entry in entries:
+            if not isinstance(entry, dict):
+                errors.append("(malformed entry — not an object)")
+                continue
+            code = str(entry.get("code", "")).strip().upper()
+            if not code or not _CODE_RE.match(code):
+                errors.append(f"{entry.get('code', '?')}: invalid instance code")
+                continue
+            if self.get_instance(code):
+                skipped.append(code)  # name already exists — do not overwrite
+                continue
+
+            env = entry.get("environment")
+            if env not in ("pilot", "production"):
+                env = environment_of(code)
+            files = [f for f in (entry.get("files") or [MANAGED_FILE]) if isinstance(f, str) and f]
+            if MANAGED_FILE not in files:
+                files = [MANAGED_FILE, *files]
+            # Exports carry paths, not contents. New instances branch from an existing
+            # one and inherit its config; only seed content for a file if the export
+            # actually included it (older exports may), never blanking the inherited one.
+            configs = entry.get("configs") if isinstance(entry.get("configs"), dict) else {}
+            paths = entry.get("paths") if isinstance(entry.get("paths"), dict) else {}
+            branch = instance_branch(code)
+            try:
+                if self.instances:
+                    self.repo.create_branch(branch, instance_branch(self.instances[0]["code"]))
+                    if MANAGED_FILE in configs:
+                        self.repo.commit_file(branch, MANAGED_FILE, str(configs[MANAGED_FILE]),
+                                              author, f"import {MANAGED_FILE}")
+                else:
+                    self.repo.init(str(configs.get(MANAGED_FILE, "")), branch)
+                for f in files:
+                    if f == MANAGED_FILE:
+                        continue
+                    if f in configs:
+                        self.repo.commit_file(branch, f, str(configs[f]), author, f"import {f}")
+                    elif not self.repo.file_exists_at(branch, f):
+                        self.repo.commit_file(branch, f, "", author, f"add managed file {f}")
+            except Exception as exc:
+                errors.append(f"{code}: could not create branch ({exc})")
+                continue
+
+            lt = entry.get("locationType")
+            inst = {
+                "code": code,
+                "environment": env,
+                "uat": bool(entry.get("uat", False)),
+                "files": files,
+                "locationType": lt if lt in LOCATION_TYPES else "server",
+                "serverAddress": str(entry.get("serverAddress", "")),
+                "paths": {k: str(v) for k, v in paths.items() if isinstance(k, str)},
+            }
+            self.instances.append(inst)
+            if inst["uat"]:
+                self._clear_other_uat(code)
+            try:
+                self.live[f"{code}:{MANAGED_FILE}"] = self.repo.read_named_file(branch, MANAGED_FILE)
+            except Exception:
+                pass
+            created.append(code)
+
+        if created:
+            self._save("instances", self.instances)
+            self._save("live", self.live)
+            self._save_repo()
+            self._audit(actor, "import-instances", details={"created": created, "skipped": skipped})
+        return {"created": created, "skipped": skipped, "errors": errors}
 
     def resolve_file_path(self, code: str, file: str) -> str:
         inst = self.get_instance(code)
